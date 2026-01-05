@@ -1,0 +1,103 @@
+[
+    {
+        "route": "/ui/alert",
+        "name": "showAlert",
+        "description": "Displays a browser alert with a message.",
+        "code": "alert(params.message);",
+        "version": "1.0.0",
+        "args": {
+            "message": {
+                "type": "string",
+                "description": "The message to display"
+            }
+        },
+        "explain_for_ai": "Use this tool to notify the user immediately via a browser alert."
+    },
+    {
+        "route": "/nav/reload",
+        "name": "reloadPage",
+        "description": "Reloads the current page.",
+        "code": "location.reload();",
+        "version": "1.0.0",
+        "args": {},
+        "explain_for_ai": "Use this to refresh the page state."
+    },
+    {
+        "route": "/nav/back",
+        "name": "goBack",
+        "description": "Navigates back in history.",
+        "code": "history.back();",
+        "version": "1.0.0",
+        "args": {},
+        "explain_for_ai": "Goes to the previous page."
+    },
+    {
+        "route": "/ui/scroll/to",
+        "name": "scrollTo",
+        "description": "Scrolls to specific coordinates.",
+        "code": "window.scrollTo({ top: params.y || 0, left: params.x || 0, behavior: 'smooth' });",
+        "version": "1.0.0",
+        "args": {
+            "x": { "type": "number", "description": "X coordinate" },
+            "y": { "type": "number", "description": "Y coordinate" }
+        },
+        "explain_for_ai": "Scrolls the window to absolute coordinates."
+    },
+    {
+        "route": "/ui/scroll/by",
+        "name": "scrollBy",
+        "description": "Scrolls by a specific amount.",
+        "code": "window.scrollBy({ top: params.y || 0, left: params.x || 0, behavior: 'smooth' });",
+        "version": "1.0.0",
+        "args": {
+            "x": { "type": "number", "description": "Horizontal pixels" },
+            "y": { "type": "number", "description": "Vertical pixels" }
+        },
+        "explain_for_ai": "Scrolls relative to current position."
+    },
+    {
+        "route": "/data/cookies",
+        "name": "getCookies",
+        "description": "Retrieves all cookies.",
+        "code": "return document.cookie;",
+        "version": "1.0.0",
+        "args": {},
+        "explain_for_ai": "Useful for debugging session state."
+    },
+    {
+        "route": "/auto/wait",
+        "name": "waitForElement",
+        "description": "Waits for an element to appear in the DOM.",
+        "code": "return await window.menu.automation.waitForElement(params.selector, params.timeout);",
+        "version": "2.0.0",
+        "args": {
+            "selector": { "type": "string", "description": "CSS selector, xpath:..., or text:..." },
+            "timeout": { "type": "number", "description": "Timeout in ms (default 5000)" }
+        },
+        "explain_for_ai": "Use this before interacting with dynamic elements."
+    },
+    {
+        "route": "/auto/click",
+        "name": "smartClick",
+        "description": "Simulates a human-like click on an element.",
+        "code": "return window.menu.automation.simulateClick(params.selector);",
+        "version": "2.0.0",
+        "args": {
+            "selector": { "type": "string", "description": "CSS selector, xpath:..., or text:..." }
+        },
+        "explain_for_ai": "Robust click that handles different event types."
+    },
+    {
+        "route": "/auto/type",
+        "name": "typeText",
+        "description": "Simulates typing text into an input field.",
+        "code": "return await window.menu.automation.simulateType(params.selector, params.text, params.delay);",
+        "version": "2.0.0",
+        "args": {
+            "selector": { "type": "string", "description": "Target input element" },
+            "text": { "type": "string", "description": "Text to type" },
+            "delay": { "type": "number", "description": "Delay between keystrokes (ms)" }
+        },
+        "explain_for_ai": "Types text character by character, triggering input events."
+    }
+]
