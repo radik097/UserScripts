@@ -2,7 +2,7 @@
 // @name            Jut.su Auto+ Core Library
 // @name:en         Jut.su Auto+ Core Library
 // @namespace       http://tampermonkey.net/
-// @version         1.0.3
+// @version         1.0.4
 // @description     Ядро логики для Jut.su Auto+ (API, обсерверы, парсинг названий)
 // @description:en  Core logic for Jut.su Auto+ (API, observers, title parsing)
 // @author          Rodion
@@ -12,18 +12,15 @@
 // @grant           GM_xmlhttpRequest
 // @license         MIT
 // ==/UserScript==
- 
-// ============================================================================
-// JUT.SU AUTO+ CORE LIBRARY (Logic & API)
-// ============================================================================
- 
- 
-// ============================================================================
-// JUT.SU AUTO+ CORE LIBRARY (Logic & API)
-// ============================================================================
- 
-window.JutsuCore = (function() {
+
+(function() {
 	'use strict';
+	
+	// ========================================================================
+	// JUT.SU AUTO+ CORE LIBRARY (Logic & API)
+	// ========================================================================
+	
+	window.JutsuCore = (function() {
  
 	const CONFIG = {
 		baseUrl: 'https://consumet-api-yij6.onrender.com',
@@ -446,4 +443,6 @@ window.JutsuCore = (function() {
 		fetchOriginalTitle,
 		fetchConsumetResults
 	};
+	})();
+	
 })();
