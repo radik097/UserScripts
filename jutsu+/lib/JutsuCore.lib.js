@@ -1,19 +1,28 @@
 // ==UserScript==
 // @name            Jut.su Auto+ Core Library
+// @name:en         Jut.su Auto+ Core Library
 // @namespace       http://tampermonkey.net/
-// @version         1.0.0
-// @description     Core logic for Jut.su Auto+ (API, Observers, Title Parsing)
+// @version         1.0.1
+// @description     Ядро логики для Jut.su Auto+ (API, обсерверы, парсинг названий)
+// @description:en  Core logic for Jut.su Auto+ (API, observers, title parsing)
 // @author          Rodion
+// @match           https://jut.su/*
+// @grant           GM_xmlhttpRequest
 // @license         MIT
 // ==/UserScript==
-
+ 
 // ============================================================================
 // JUT.SU AUTO+ CORE LIBRARY (Logic & API)
 // ============================================================================
-
+ 
+ 
+// ============================================================================
+// JUT.SU AUTO+ CORE LIBRARY (Logic & API)
+// ============================================================================
+ 
 window.JutsuCore = (function() {
 	'use strict';
-
+ 
 	const CONFIG = {
 		baseUrl: 'https://consumet-api-yij6.onrender.com',
 		retries: 2,
@@ -22,18 +31,18 @@ window.JutsuCore = (function() {
 		servers: ['hd-1', 'vidstreaming', 'megacloud'],
 		categories: ['sub', 'dub', 'raw']
 	};
-
+ 
 	const logs = [];
 	let debugMode = false;
-
+ 
 	function setConfig(partial) {
 		Object.assign(CONFIG, partial || {});
 	}
-
+ 
 	function setDebugMode(value) {
 		debugMode = !!value;
 	}
-
+ 
 	function log(category, message, data = null) {
 		const timestamp = new Date().toLocaleTimeString();
 		const entry = {
@@ -44,7 +53,7 @@ window.JutsuCore = (function() {
 		};
 		logs.push(entry);
 		window.alisaLogs = logs;
-
+ 
 		const shouldLog = debugMode || category.includes('ERROR') || category.includes('[API]');
 		if (shouldLog && (category.includes('ERROR') || category.includes('[API]') || category.includes('[VIDEO]'))) {
 			const style = `color: ${category.includes('ERROR') ? '#ff6b6b' : '#81a834'}; font-weight: bold;`;
@@ -52,33 +61,33 @@ window.JutsuCore = (function() {
 			if (data && debugMode) console.log(data);
 		}
 	}
-
+ 
 	function debug(message, details = null) {
 		if (!debugMode) return;
 		const timestamp = new Date().toLocaleTimeString();
 		console.log(`%c[${timestamp}] [DEBUG] ${message}`, 'background: #ff9800; color: #fff; padding: 2px 6px; border-radius: 3px; font-weight: bold;');
 		if (details) console.table(details);
 	}
-
+ 
 	function flushLogs() {
 		if (!logs.length) return;
-
+ 
 		const modeIndicator = debugMode ? ' DEBUG MODE' : '';
 		console.group(`%cJut.su Auto+ Report — ${window.location.pathname}${modeIndicator}`, `background: ${debugMode ? '#ff9800' : '#4caf50'}; color: #fff; padding: 4px 8px; border-radius: 3px; font-weight: bold;`);
-
+ 
 		logs.forEach((entry) => {
 			const style = `color: ${entry.category.includes('ERROR') ? '#ff6b6b' : '#81a834'}; font-weight: bold;`;
 			console.log(`%c[${entry.timestamp}] ${entry.category}%c ${entry.message}`, style, 'color: inherit; font-weight: normal;');
 			if (entry.data) console.log(entry.data);
 		});
-
+ 
 		console.log(`%cTotal logs: ${logs.length} | Debug Mode: ${debugMode ? 'ON' : 'OFF'}`, 'color: #999; font-size: 11px;');
 		console.groupEnd();
 	}
-
+ 
 	const observerManager = {
 		observers: new Map(),
-
+ 
 		create(name, callback, options = {}) {
 			const defaultOptions = { childList: true, subtree: true, ...options };
 			const observer = new MutationObserver(callback);
@@ -86,7 +95,7 @@ window.JutsuCore = (function() {
 			log('[INIT]', `MutationObserver '${name}' created`, { options: defaultOptions });
 			return observer;
 		},
-
+ 
 		observe(name, target = document.documentElement) {
 			const observer = this.observers.get(name);
 			if (!observer) {
@@ -97,7 +106,7 @@ window.JutsuCore = (function() {
 			log('[INIT]', `Observer '${name}' attached to DOM`);
 			return observer;
 		},
-
+ 
 		disconnect(name) {
 			const observer = this.observers.get(name);
 			if (!observer) return;
@@ -105,31 +114,31 @@ window.JutsuCore = (function() {
 			this.observers.delete(name);
 			log('[INIT]', `Observer '${name}' disconnected`);
 		},
-
+ 
 		disconnectAll() {
 			this.observers.forEach((observer) => observer.disconnect());
 			this.observers.clear();
 			log('[INIT]', 'All observers disconnected');
 		}
 	};
-
+ 
 	function validateAPIResponse(response) {
 		if (!response || !response.responseText) {
 			debug('Response validation failed: empty or missing');
 			return null;
 		}
-
+ 
 		const text = response.responseText.trim();
 		if (!text) {
 			debug('Response text is empty after trim');
 			return null;
 		}
-
+ 
 		if (response.status && (response.status >= 400 && response.status < 600)) {
 			debug(`HTTP Error ${response.status}`, { responseLength: text.length });
 			return null;
 		}
-
+ 
 		try {
 			const parsed = JSON.parse(text);
 			if (debugMode) {
@@ -142,13 +151,13 @@ window.JutsuCore = (function() {
 			return null;
 		}
 	}
-
+ 
 	function gmRequestJson(url, contextLabel, retries = CONFIG.retries) {
 		return new Promise((resolve) => {
 			const startTime = performance.now();
 			const attempt = (attemptNum) => {
 				debug(`API request attempt ${attemptNum + 1}/${retries + 1}`, { url: url, context: contextLabel });
-
+ 
 				GM_xmlhttpRequest({
 					method: 'GET',
 					url,
@@ -162,12 +171,12 @@ window.JutsuCore = (function() {
 					},
 					onload: (response) => {
 						const duration = Math.round(performance.now() - startTime);
-
+ 
 						if (debugMode) {
 							console.log('%c[RAW RESPONSE]', 'background: #2196F3; color: #fff; padding: 2px 6px; border-radius: 3px; font-weight: bold;');
 							console.log(`Status: ${response.status} | Duration: ${duration}ms | Length: ${response.responseText?.length || 0}`);
 						}
-
+ 
 						const data = validateAPIResponse(response);
 						if (data) {
 							debug('✅ API response parsed successfully', {
@@ -179,7 +188,7 @@ window.JutsuCore = (function() {
 							resolve(data);
 							return;
 						}
-
+ 
 						if (attemptNum < retries) {
 							debug(`🔄 Retrying (${attemptNum + 1}/${retries})...`, { delay: '1000ms' });
 							setTimeout(() => attempt(attemptNum + 1), 1000);
@@ -192,7 +201,7 @@ window.JutsuCore = (function() {
 					onerror: (error) => {
 						const duration = Math.round(performance.now() - startTime);
 						const errorMsg = error?.error?.message || error?.message || 'Unknown network error';
-
+ 
 						if (attemptNum < retries) {
 							debug(`⚠️ Request error, retrying (${attemptNum + 1}/${retries})...`, { error: errorMsg, delay: '1500ms' });
 							setTimeout(() => attempt(attemptNum + 1), 1500);
@@ -215,11 +224,11 @@ window.JutsuCore = (function() {
 					}
 				});
 			};
-
+ 
 			attempt(0);
 		});
 	}
-
+ 
 	function getEpisodeInfo() {
 		const pathMatch = window.location.pathname.match(/season-(\d+).*episode-(\d+)/);
 		if (pathMatch) {
@@ -228,7 +237,7 @@ window.JutsuCore = (function() {
 		const epMatch = window.location.pathname.match(/episode-(\d+)/);
 		return { season: null, episode: epMatch ? epMatch[1] : null };
 	}
-
+ 
 	function buildTitleVariants(rawTitle, episode) {
 		const variants = [];
 		const seen = new Set();
@@ -253,15 +262,15 @@ window.JutsuCore = (function() {
 			seen.add(normalized);
 			variants.push(normalized);
 		};
-
+ 
 		const slug = (window.location.pathname.split('/').filter(Boolean)[0] || '')
 			.replace(/[-_]/g, ' ')
 			.replace(/\d+/g, '')
 			.trim();
 		add(slug);
-
+ 
 		add(rawTitle);
-
+ 
 		let cleaned = (rawTitle || '')
 			.replace(/^\s*смотреть\s+/iu, '')
 			.replace(/\s+на\s+jut\.su\s*$/iu, '')
@@ -271,15 +280,15 @@ window.JutsuCore = (function() {
 			.replace(/\s*\[.*?\]\s*/g, '')
 			.replace(/\s*\(.*?\)\s*/g, '')
 			.trim();
-
+ 
 		cleaned = cleaned
 			.replace(/\s+(\d+)\s+(серия|серии|серий|епизод|episode|episode\s*\d+)\s*$/iu, '')
 			.replace(/\s+(season\s+\d+\s+)?episode\s+\d+\s*$/iu, '')
 			.replace(/\s+part\s+\d+\s*$/iu, '')
 			.trim();
-
+ 
 		add(cleaned);
-
+ 
 		if (episode) {
 			const noEp = (rawTitle || '')
 				.replace(new RegExp(`\\b${episode}\\b\\s*(серия|серии|серий|епизод|episode)?`, 'iu'), '')
@@ -287,20 +296,20 @@ window.JutsuCore = (function() {
 				.trim();
 			add(noEp);
 		}
-
+ 
 		const words = rawTitle ? rawTitle.split(/\s+/) : [];
 		if (words.length > 2) {
 			add(words.slice(0, Math.min(3, words.length)).join(' ').replace(/^смотреть\s+/iu, '').trim());
 		}
-
+ 
 		if (hasCyrillic(cleaned)) add(translit(cleaned));
 		if (hasCyrillic(rawTitle)) add(translit(rawTitle));
-
+ 
 		const filtered = variants.filter((value) => value && !hasCyrillic(value));
 		debug('Title variants generated', { original: rawTitle, variants: filtered, count: filtered.length });
 		return filtered;
 	}
-
+ 
 	function pickEpisode(episodes, episodeNumber) {
 		if (!Array.isArray(episodes) || !episodes.length) return null;
 		if (episodeNumber) {
@@ -309,7 +318,7 @@ window.JutsuCore = (function() {
 		}
 		return episodes[0];
 	}
-
+ 
 	function buildUrlMapFromSources(sources) {
 		const urls = {};
 		(sources || []).forEach((source) => {
@@ -323,7 +332,7 @@ window.JutsuCore = (function() {
 		}
 		return urls;
 	}
-
+ 
 	async function fetchOriginalTitle() {
 		try {
 			debug('Attempting to fetch title from page');
@@ -348,19 +357,19 @@ window.JutsuCore = (function() {
 			return null;
 		}
 	}
-
+ 
 	async function fetchConsumetResults(title, episode) {
 		try {
 			const results = [];
-
+ 
 			for (const provider of CONFIG.providers) {
 				const searchUrl = `${CONFIG.baseUrl}/anime/${provider}/${encodeURIComponent(title)}?page=1`;
 				const searchData = await gmRequestJson(searchUrl, `consumet.${provider}.search`);
 				const searchResults = searchData?.results || [];
 				if (!searchResults.length) continue;
-
+ 
 				const limitedResults = searchResults.slice(0, 3);
-
+ 
 				for (const item of limitedResults) {
 					try {
 						const infoUrl = `${CONFIG.baseUrl}/anime/${provider}/info/${encodeURIComponent(item.id)}`;
@@ -371,14 +380,14 @@ window.JutsuCore = (function() {
 							const epsData = await gmRequestJson(epsUrl, `consumet.${provider}.episodes`);
 							episodes = epsData?.episodes || epsData || [];
 						}
-
+ 
 						const episodeItem = pickEpisode(episodes, episode);
 						const episodeId = episodeItem?.id || episodeItem?.episodeId;
 						if (!episodeId) {
 							debug('Consumet episodeId missing', { provider, title: item.title });
 							continue;
 						}
-
+ 
 						let sources = [];
 						for (const category of CONFIG.categories) {
 							for (const server of CONFIG.servers) {
@@ -389,9 +398,9 @@ window.JutsuCore = (function() {
 							}
 							if (sources.length) break;
 						}
-
+ 
 						if (!sources.length) continue;
-
+ 
 						const urls = buildUrlMapFromSources(sources);
 						results.push({
 							id: item.id,
@@ -407,19 +416,19 @@ window.JutsuCore = (function() {
 						continue;
 					}
 				}
-
+ 
 				if (results.length) break;
 			}
-
+ 
 			return results;
 		} catch (err) {
 			debug('Consumet provider error', { error: err.message });
 			return [];
 		}
 	}
-
+ 
 	window.alisaLogs = logs;
-
+ 
 	return {
 		setConfig,
 		setDebugMode,
