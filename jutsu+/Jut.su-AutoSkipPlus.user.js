@@ -2,7 +2,7 @@
 // @name            Jut.su АвтоСкип+ (Ultimate Edition by description009)
 // @name:en         Jut.su Auto+ (Skip Intro, Next Episode, Preview, Download + External Sources)
 // @namespace       http://tampermonkey.net/
-// @version         3.8.0
+// @version         3.8.1
 // @description     Автоскип заставок, автопереход, предпросмотр серий, кнопка загрузки, интеграция внешних видео-ссылок, модальное окно выбора источников и панель настроек
 // @description:en  Auto-skip intros, next episode, previews, download button, external sources with source picker modal and settings panel
 // @author          Rodion (integrator), Diorhc (preview), VakiKrin (download), nab (external sources), Alisa (refactoring, logging & architecture)
@@ -12,6 +12,7 @@
 // @grant           GM_setValue
 // @grant           GM_getValue
 // @grant           GM_xmlhttpRequest
+// @require         https://github.com/radik097/UserScripts/raw/refs/heads/main/jutsu+/lib/JutsuCore.lib.js
 // @downloadURL     https://github.com/radik097/UserScripts/raw/refs/heads/main/jutsu+/Jut.su-AutoSkipPlus.user.js
 // @updateURL       https://github.com/radik097/UserScripts/raw/refs/heads/main/jutsu+/Jut.su-AutoSkipPlus.user.js
 // @connect         andb.workers.dev
@@ -26,49 +27,24 @@
     // LOGGING INFRASTRUCTURE (Enhanced with Debug Mode)
     // ═══════════════════════════════════════════════════════════════════════════════
     
-    window.alisaLogs = [];
+    const Core = window.JutsuCore;
+    if (!Core) {
+        console.error('JutsuCore.lib.js not loaded');
+        return;
+    }
     window.debugMode = GM_getValue('debugMode', false);
+    Core.setDebugMode(window.debugMode);
     
     function alisaLog(category, message, data = null) {
-        const timestamp = new Date().toLocaleTimeString();
-        const logEntry = {
-            timestamp,
-            category,
-            message,
-            data: data ? JSON.stringify(data, null, 2) : null
-        };
-        window.alisaLogs.push(logEntry);
-        
-        // Always log errors and API success, only debug logs in debug mode
-        const shouldLog = window.debugMode || category.includes('ERROR') || category.includes('[API]');
-        if (shouldLog && (category.includes('ERROR') || category.includes('[API]') || category.includes('[VIDEO]'))) {
-            const style = `color: ${category.includes('ERROR') ? '#ff6b6b' : '#81a834'}; font-weight: bold;`;
-            console.log(`%c[${timestamp}] ${category}%c ${message}`, style, 'color: inherit;');
-            if (data && window.debugMode) console.log(data);
-        }
+        Core.log(category, message, data);
     }
     
     function debugLog(message, details = null) {
-        if (!window.debugMode) return;
-        const timestamp = new Date().toLocaleTimeString();
-        console.log(`%c[${timestamp}] [DEBUG] ${message}`, 'background: #ff9800; color: #fff; padding: 2px 6px; border-radius: 3px; font-weight: bold;');
-        if (details) console.table(details);
+        Core.debug(message, details);
     }
     
     function alisaFlushLogs() {
-        if (!window.alisaLogs.length) return;
-        
-        const modeIndicator = window.debugMode ? ' 🔧 DEBUG MODE' : '';
-        console.group(`%cJut.su Auto+ Report — ${window.location.pathname}${modeIndicator}`, `background: ${window.debugMode ? '#ff9800' : '#4caf50'}; color: #fff; padding: 4px 8px; border-radius: 3px; font-weight: bold;`);
-        
-        window.alisaLogs.forEach((entry) => {
-            const style = `color: ${entry.category.includes('ERROR') ? '#ff6b6b' : '#81a834'}; font-weight: bold;`;
-            console.log(`%c[${entry.timestamp}] ${entry.category}%c ${entry.message}`, style, 'color: inherit; font-weight: normal;');
-            if (entry.data) console.log(entry.data);
-        });
-        
-        console.log(`%cTotal logs: ${window.alisaLogs.length} | Debug Mode: ${window.debugMode ? '🟢 ON' : '⚫ OFF'}`, 'color: #999; font-size: 11px;');
-        console.groupEnd();
+        Core.flushLogs();
     }
     
     window.addEventListener('load', alisaFlushLogs);
@@ -77,42 +53,7 @@
     // MUTATION OBSERVER MANAGER (Prevent memory leaks)
     // ═══════════════════════════════════════════════════════════════════════════════
     
-    const observerManager = {
-        observers: new Map(),
-        
-        create(name, callback, options = {}) {
-            const defaultOptions = { childList: true, subtree: true, ...options };
-            const observer = new MutationObserver(callback);
-            this.observers.set(name, observer);
-            alisaLog('[INIT]', `MutationObserver '${name}' created`, { options: defaultOptions });
-            return observer;
-        },
-        
-        observe(name, target = document.documentElement) {
-            const observer = this.observers.get(name);
-            if (!observer) {
-                alisaLog('[ERROR]', `Observer '${name}' not found`);
-                return null;
-            }
-            observer.observe(target, { childList: true, subtree: true });
-            alisaLog('[INIT]', `Observer '${name}' attached to DOM`);
-            return observer;
-        },
-        
-        disconnect(name) {
-            const observer = this.observers.get(name);
-            if (!observer) return;
-            observer.disconnect();
-            this.observers.delete(name);
-            alisaLog('[INIT]', `Observer '${name}' disconnected`);
-        },
-        
-        disconnectAll() {
-            this.observers.forEach((observer) => observer.disconnect());
-            this.observers.clear();
-            alisaLog('[INIT]', 'All observers disconnected');
-        }
-    };
+    const observerManager = Core.observerManager;
     
     window.addEventListener('beforeunload', () => observerManager.disconnectAll());
 
@@ -165,87 +106,11 @@
     }
     
     function getEpisodeInfo() {
-        const pathMatch = window.location.pathname.match(/season-(\d+).*episode-(\d+)/);
-        if (pathMatch) {
-            return { season: pathMatch[1], episode: pathMatch[2] };
-        }
-        const epMatch = window.location.pathname.match(/episode-(\d+)/);
-        return { season: null, episode: epMatch ? epMatch[1] : null };
+        return Core.getEpisodeInfo();
     }
 
     function buildTitleVariants(rawTitle, episode) {
-        const variants = [];
-        const seen = new Set();
-        const hasCyrillic = (value) => /[\u0400-\u04FF]/.test(value || '');
-        const translitMap = {
-            'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo',
-            'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
-            'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
-            'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'shch',
-            'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya'
-        };
-        const translit = (value) => (value || '')
-            .toLowerCase()
-            .split('')
-            .map((char) => translitMap[char] ?? char)
-            .join('')
-            .replace(/\s+/g, ' ')
-            .trim();
-        const add = (value) => {
-            const normalized = (value || '').replace(/\s+/g, ' ').trim();
-            if (!normalized || seen.has(normalized)) return;
-            seen.add(normalized);
-            variants.push(normalized);
-        };
-
-        // Prefer URL slug first (often English/romaji)
-        const slug = (window.location.pathname.split('/').filter(Boolean)[0] || '')
-            .replace(/[-_]/g, ' ')
-            .replace(/\d+/g, '')
-            .trim();
-        add(slug);
-
-        // Original title
-        add(rawTitle);
-
-        // Aggressive cleaning: remove all jut.su boilerplate
-        let cleaned = (rawTitle || '')
-            .replace(/^\s*смотреть\s+/iu, '')
-            .replace(/\s+на\s+jut\.su\s*$/iu, '')
-            .replace(/\s*\(jut\.su\)\s*$/iu, '')
-            .replace(/\s+(на\s+)?русском\s*$/iu, '')
-            .replace(/\s*-\s*anime\s*$/iu, '')
-            .replace(/\s*\[.*?\]\s*/g, '')
-            .replace(/\s*\(.*?\)\s*/g, '')
-            .trim();
-
-        cleaned = cleaned
-            .replace(/\s+(\d+)\s+(серия|серии|серий|епизод|episode|episode\s*\d+)\s*$/iu, '')
-            .replace(/\s+(season\s+\d+\s+)?episode\s+\d+\s*$/iu, '')
-            .replace(/\s+part\s+\d+\s*$/iu, '')
-            .trim();
-
-        add(cleaned);
-
-        if (episode) {
-            const noEp = (rawTitle || '')
-                .replace(new RegExp(`\\b${episode}\\b\\s*(серия|серии|серий|епизод|episode)?`, 'iu'), '')
-                .replace(/^\s*смотреть\s+/iu, '')
-                .trim();
-            add(noEp);
-        }
-
-        const words = rawTitle ? rawTitle.split(/\s+/) : [];
-        if (words.length > 2) {
-            add(words.slice(0, Math.min(3, words.length)).join(' ').replace(/^смотреть\s+/iu, '').trim());
-        }
-
-        if (hasCyrillic(cleaned)) add(translit(cleaned));
-        if (hasCyrillic(rawTitle)) add(translit(rawTitle));
-
-        const filtered = variants.filter((value) => value && !hasCyrillic(value));
-        debugLog('Title variants generated', { original: rawTitle, variants: filtered, count: filtered.length });
-        return filtered;
+        return Core.buildTitleVariants(rawTitle, episode);
     }
 
     function getProviderOrder(primary) {
@@ -262,104 +127,15 @@
     }
 
     function pickEpisode(episodes, episodeNumber) {
-        if (!Array.isArray(episodes) || !episodes.length) return null;
-        if (episodeNumber) {
-            const byNumber = episodes.find((ep) => String(ep.number ?? ep.episode ?? ep.episodeNumber) === String(episodeNumber));
-            return byNumber || episodes[0];
-        }
-        return episodes[0];
+        return Core.pickEpisode(episodes, episodeNumber);
     }
 
     function buildUrlMapFromSources(sources) {
-        const urls = {};
-        (sources || []).forEach((source) => {
-            const quality = source.quality || (source.isM3U8 ? 'hls' : 'default');
-            if (source.url && !urls[quality]) {
-                urls[quality] = source.url;
-            }
-        });
-        if (!urls.default && sources?.[0]?.url) {
-            urls.default = sources[0].url;
-        }
-        return urls;
+        return Core.buildUrlMapFromSources(sources);
     }
 
     function gmRequestJson(url, contextLabel, retries = 2) {
-        return new Promise((resolve) => {
-            const startTime = performance.now();
-            const attempt = (attemptNum) => {
-                debugLog(`API request attempt ${attemptNum + 1}/${retries + 1}`, { url: url, context: contextLabel });
-                
-                GM_xmlhttpRequest({
-                    method: 'GET',
-                    url,
-                    timeout: API_TIMEOUT,
-                    headers: {
-                        'User-Agent': navigator.userAgent,
-                        'Referer': 'https://jut.su/',
-                        'Origin': 'https://jut.su',
-                        'Accept': 'application/json',
-                        'Accept-Language': 'en-US,en;q=0.9'
-                    },
-                    onload: (response) => {
-                        const duration = Math.round(performance.now() - startTime);
-                        
-                        if (window.debugMode) {
-                            console.log('%c[RAW RESPONSE]', 'background: #2196F3; color: #fff; padding: 2px 6px; border-radius: 3px; font-weight: bold;');
-                            console.log(`Status: ${response.status} | Duration: ${duration}ms | Length: ${response.responseText?.length || 0}`);
-                        }
-
-                        const data = validateAPIResponse(response);
-                        if (data) {
-                            debugLog('✅ API response parsed successfully', {
-                                context: contextLabel,
-                                status: response.status,
-                                duration: `${duration}ms`,
-                                resultCount: data.results?.length || data.data?.results?.length || 'N/A'
-                            });
-                            resolve(data);
-                            return;
-                        }
-                        
-                        // Retry on empty response
-                        if (attemptNum < retries) {
-                            debugLog(`🔄 Retrying (${attemptNum + 1}/${retries})...`, { delay: '1000ms' });
-                            setTimeout(() => attempt(attemptNum + 1), 1000);
-                        } else {
-                            alisaLog('[ERROR]', `API failure after ${retries + 1} attempts: ${contextLabel}`);
-                            debugLog('❌ All API retries exhausted', { context: contextLabel, totalDuration: `${duration}ms` });
-                            resolve(null);
-                        }
-                    },
-                    onerror: (error) => {
-                        const duration = Math.round(performance.now() - startTime);
-                        const errorMsg = error?.error?.message || error?.message || 'Unknown network error';
-                        
-                        if (attemptNum < retries) {
-                            debugLog(`⚠️ Request error, retrying (${attemptNum + 1}/${retries})...`, { error: errorMsg, delay: '1500ms' });
-                            setTimeout(() => attempt(attemptNum + 1), 1500);
-                        } else {
-                            alisaLog('[ERROR]', `Network error after retries: ${errorMsg}`, { context: contextLabel });
-                            debugLog('❌ Network error failed all retries', { error: errorMsg, totalDuration: `${duration}ms` });
-                            resolve(null);
-                        }
-                    },
-                    ontimeout: () => {
-                        const duration = Math.round(performance.now() - startTime);
-                        if (attemptNum < retries) {
-                            debugLog(`⏱️ Timeout, retrying (${attemptNum + 1}/${retries})...`, { duration: `${duration}ms` });
-                            setTimeout(() => attempt(attemptNum + 1), 2000);
-                        } else {
-                            alisaLog('[ERROR]', `Request timeout after ${retries + 1} attempts: ${contextLabel}`);
-                            debugLog('❌ Timeout on all retry attempts', { context: contextLabel, totalDuration: `${duration}ms` });
-                            resolve(null);
-                        }
-                    }
-                });
-            };
-            
-            attempt(0);
-        });
+        return Core.gmRequestJson(url, contextLabel, retries);
     }
  
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -391,6 +167,15 @@
     const PROVIDER_HEALTH_TTL = 5 * 60 * 1000;
     const PROVIDER_HEALTH_TIMEOUT = 3500;
     const providerHealthCache = new Map();
+
+    Core.setConfig({
+        baseUrl: PROVIDER_BASE_URLS.consumet,
+        retries: 2,
+        timeout: API_TIMEOUT,
+        providers: CONSUMET_PROVIDERS,
+        servers: CONSUMET_SERVERS,
+        categories: CONSUMET_CATEGORIES
+    });
     
     function updateSetting(key, value) {
         settings[key] = value;
@@ -399,6 +184,7 @@
         // Special handling for Debug Mode
         if (key === 'debugMode') {
             window.debugMode = value;
+            Core.setDebugMode(value);
             debugLog(`Debug Mode ${value ? 'ENABLED' : 'DISABLED'}`, { 
                 timestamp: new Date().toISOString(),
                 logsCount: window.alisaLogs.length
@@ -886,98 +672,11 @@
     }
     
     async function fetchOriginalTitle() {
-        try {
-            debugLog('Attempting to fetch title from page');
-            const titleElement = document.querySelector('h1.post_title, h1, [data-test="title"]');
-            if (titleElement) {
-                const title = titleElement.textContent.trim();
-                debugLog('Title found via element selector', { 
-                    selector: 'h1.post_title, h1, [data-test="title"]',
-                    title: title
-                });
-                return title;
-            }
-            const fallbackTitle = document.title.split('—')[0].trim();
-            debugLog('Title extracted from document.title', { title: fallbackTitle });
-            return fallbackTitle;
-        } catch (e) {
-            alisaLog('[ERROR]', 'Failed to fetch original title', { error: e.message });
-            debugLog('Exception while fetching title', {
-                error: e.message,
-                stack: e.stack?.substring(0, 200)
-            });
-            return null;
-        }
+        return Core.fetchOriginalTitle();
     }
     
     async function fetchConsumetResults(title, episode) {
-        try {
-            const baseUrl = PROVIDER_BASE_URLS.consumet;
-            const results = [];
-
-            for (const provider of CONSUMET_PROVIDERS) {
-                const searchUrl = `${baseUrl}/anime/${provider}/${encodeURIComponent(title)}?page=1`;
-                const searchData = await gmRequestJson(searchUrl, `consumet.${provider}.search`);
-                const searchResults = searchData?.results || [];
-                if (!searchResults.length) continue;
-
-                const limitedResults = searchResults.slice(0, 3);
-
-                for (const item of limitedResults) {
-                    try {
-                        const infoUrl = `${baseUrl}/anime/${provider}/info/${encodeURIComponent(item.id)}`;
-                        const infoData = await gmRequestJson(infoUrl, `consumet.${provider}.info`);
-                        let episodes = infoData?.episodes || [];
-                        if (!episodes.length) {
-                            const epsUrl = `${baseUrl}/anime/${provider}/episodes/${encodeURIComponent(item.id)}`;
-                            const epsData = await gmRequestJson(epsUrl, `consumet.${provider}.episodes`);
-                            episodes = epsData?.episodes || epsData || [];
-                        }
-
-                        const episodeItem = pickEpisode(episodes, episode);
-                        const episodeId = episodeItem?.id || episodeItem?.episodeId;
-                        if (!episodeId) {
-                            if (window.debugMode) debugLog('Consumet episodeId missing', { provider, title: item.title });
-                            continue;
-                        }
-
-                        let sources = [];
-                        for (const category of CONSUMET_CATEGORIES) {
-                            for (const server of CONSUMET_SERVERS) {
-                                const watchUrl = `${baseUrl}/anime/${provider}/watch/${encodeURIComponent(episodeId)}?server=${encodeURIComponent(server)}&category=${encodeURIComponent(category)}`;
-                                const watchData = await gmRequestJson(watchUrl, `consumet.${provider}.watch`);
-                                sources = watchData?.sources || [];
-                                if (sources.length) break;
-                            }
-                            if (sources.length) break;
-                        }
-
-                        if (!sources.length) continue;
-
-                        const urls = buildUrlMapFromSources(sources);
-                        results.push({
-                            id: item.id,
-                            title: item.title,
-                            provider: provider,
-                            type: 'stream',
-                            link: urls.default,
-                            urls: urls,
-                            quality: sources[0]?.quality || 'auto'
-                        });
-                    } catch (itemError) {
-                        if (window.debugMode) debugLog('Consumet item processing error', { title: item.title, error: itemError.message });
-                        continue;
-                    }
-                }
-
-                if (results.length) break;
-            }
-
-            return results;
-        } catch (err) {
-            if (window.debugMode) debugLog('Consumet provider error', { error: err.message });
-            return [];
-        }
+        return Core.fetchConsumetResults(title, episode);
     }
 
     async function fetchProviderResults(providerKey, title, episode) {
@@ -1077,14 +776,11 @@
             return;
         }
 
-        alisaLog('[VIDEO]', 'External sources search is disabled (in development)');
         (async () => {
             const providerOrder = getProviderOrder(settings.providerPrimary);
             showAlisaNotify('🔍 Проверка доступности источников...');
             const availableProviders = await getAvailableProviders(providerOrder);
             if (!availableProviders.length) {
-                            console.log('Версия: 3.8.0');
-                                    version: '3.8.0',
                 showAlisaNotify('⚠️ Внешние источники недоступны, используется оригинальный плеер');
                 callback(null);
                 return;
@@ -1838,7 +1534,7 @@
         infoBtn.textContent = 'ℹ️ О скрипте (консоль)';
         infoBtn.addEventListener('click', () => {
             console.log('%cJut.su Auto+ (Ultimate Edition)', 'background: #4caf50; color: #fff; padding: 8px; border-radius: 3px; font-weight: bold; font-size: 14px;');
-            console.log('Версия: 3.7.9');
+            console.log('Версия: 3.8.1');
             console.log('Авторы: Rodion, Diorhc, VakiKrin, nab, Alisa');
             console.log('Лицензия: MIT');
             console.log('════════════════════════════════════════');
@@ -1865,7 +1561,7 @@
             console.log('%cDEBUG: EXPORTABLE JSON', 'background: #9C27B0; color: #fff; padding: 4px; font-weight: bold;');
             console.log(JSON.stringify({
                 metadata: {
-                    version: '3.7.9',
+                    version: '3.8.1',
                     debugMode: window.debugMode,
                     timestamp: new Date().toISOString(),
                     url: window.location.href,
