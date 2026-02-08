@@ -12,6 +12,8 @@
 // @grant           GM_setValue
 // @grant           GM_getValue
 // @grant           GM_xmlhttpRequest
+// @downloadURL     https://raw.githubusercontent.com/radik097/UserScripts/refs/heads/main/jutsu+/Jut.su-AutoSkipPlus.user.js
+// @updateURL       https://raw.githubusercontent.com/radik097/UserScripts/refs/heads/main/jutsu+/Jut.su-AutoSkipPlus.user.js
 // @connect         andb.workers.dev
 // @run-at          document-start
 // ==/UserScript==
@@ -170,6 +172,35 @@
         }
         const epMatch = window.location.pathname.match(/episode-(\d+)/);
         return { season: null, episode: epMatch ? epMatch[1] : null };
+    }
+
+    function buildTitleVariants(rawTitle, episode) {
+        const variants = [];
+        const seen = new Set();
+        const add = (value) => {
+            const normalized = (value || '').replace(/\s+/g, ' ').trim();
+            if (!normalized || seen.has(normalized)) return;
+            seen.add(normalized);
+            variants.push(normalized);
+        };
+
+        add(rawTitle);
+
+        let cleaned = (rawTitle || '').replace(/^\s*смотреть\s+/iu, '').trim();
+        cleaned = cleaned.replace(/\s*(\d+)\s*(серия|серии|серий)\s*$/iu, '').trim();
+        cleaned = cleaned.replace(/\s*(серия|серии|серий)\s*(\d+)\s*$/iu, '').trim();
+        cleaned = cleaned.replace(/\s*episode\s*\d+\s*$/iu, '').trim();
+        add(cleaned);
+
+        if (episode) {
+            const noEp = (rawTitle || '').replace(new RegExp(`\\s*${episode}\\s*(серия|серии|серий)?\\s*$`, 'iu'), '').trim();
+            add(noEp);
+        }
+
+        const slug = (window.location.pathname.split('/').filter(Boolean)[0] || '').replace(/[-_]+/g, ' ').trim();
+        add(slug);
+
+        return variants.filter(Boolean);
     }
  
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -584,85 +615,122 @@
         }
     }
     
-    function fetchExternalSources(title, callback) {
-        if (!title) {
+    function fetchExternalSources(titleOrTitles, callback) {
+        const { episode } = getEpisodeInfo();
+        const titles = Array.isArray(titleOrTitles)
+            ? titleOrTitles.filter(Boolean)
+            : buildTitleVariants(titleOrTitles, episode);
+
+        if (!titles.length) {
             alisaLog('[API]', 'No title provided for source fetch');
-            debugLog('Title is empty, skipping API fetch');
+            debugLog('Title list is empty, skipping API fetch');
             callback(null);
             return;
         }
-        
-        alisaLog('[API]', `Fetching sources for: ${title}`);
-        debugLog('Starting API request', { 
-            url: API_URL, 
-            title: title,
-            timeout: API_TIMEOUT,
-            encodedTitle: encodeURIComponent(title)
-        });
-        
-        const startTime = performance.now();
-        const timeoutId = setTimeout(() => {
-            alisaLog('[ERROR]', 'API request timeout');
-            debugLog('API request timeout', { duration: Math.round(performance.now() - startTime) + 'ms' });
-            callback(null);
-        }, API_TIMEOUT);
-        
-        GM_xmlhttpRequest({
-            method: 'GET',
-            url: `${API_URL}?title=${encodeURIComponent(title)}`,
-            timeout: API_TIMEOUT,
-            onload: (response) => {
-                clearTimeout(timeoutId);
-                const duration = Math.round(performance.now() - startTime);
-                debugLog('API response received', { 
-                    status: response.status, 
-                    duration: duration + 'ms',
-                    responseLength: response.responseText?.length
-                });
-                
-                if (window.debugMode) {
-                    console.log('%c[RAW RESPONSE]', 'background: #2196F3; color: #fff; padding: 2px 6px; border-radius: 3px; font-weight: bold;');
-                    console.log(response.responseText?.substring(0, 1000) || 'No response');
-                }
-                
-                const data = validateAPIResponse(response);
-                
-                if (!data) {
+
+        debugLog('Title variants prepared for API search', { titles: titles });
+
+        let currentIndex = 0;
+        const tryNextTitle = () => {
+            const currentTitle = titles[currentIndex];
+            alisaLog('[API]', `Fetching sources for: ${currentTitle}`);
+            debugLog('Starting API request', { 
+                url: API_URL, 
+                title: currentTitle,
+                timeout: API_TIMEOUT,
+                encodedTitle: encodeURIComponent(currentTitle),
+                attempt: currentIndex + 1,
+                totalAttempts: titles.length
+            });
+
+            const startTime = performance.now();
+            const timeoutId = setTimeout(() => {
+                alisaLog('[ERROR]', 'API request timeout');
+                debugLog('API request timeout', { duration: Math.round(performance.now() - startTime) + 'ms' });
+                currentIndex += 1;
+                if (currentIndex < titles.length) {
+                    tryNextTitle();
+                } else {
                     callback(null);
-                    return;
                 }
-                
-                const results = data.results || [];
-                if (results.length === 0) {
-                    alisaLog('[API]', 'No sources found in API response');
-                    debugLog('API returned empty results array');
-                    callback(null);
-                    return;
+            }, API_TIMEOUT);
+
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: `${API_URL}?title=${encodeURIComponent(currentTitle)}`,
+                timeout: API_TIMEOUT,
+                onload: (response) => {
+                    clearTimeout(timeoutId);
+                    const duration = Math.round(performance.now() - startTime);
+                    debugLog('API response received', { 
+                        status: response.status, 
+                        duration: duration + 'ms',
+                        responseLength: response.responseText?.length,
+                        titleUsed: currentTitle
+                    });
+
+                    if (window.debugMode) {
+                        console.log('%c[RAW RESPONSE]', 'background: #2196F3; color: #fff; padding: 2px 6px; border-radius: 3px; font-weight: bold;');
+                        console.log(response.responseText?.substring(0, 1000) || 'No response');
+                    }
+
+                    const data = validateAPIResponse(response);
+                    if (!data) {
+                        debugLog('Response invalid for title variant', { title: currentTitle, status: response.status });
+                        currentIndex += 1;
+                        if (currentIndex < titles.length) {
+                            tryNextTitle();
+                        } else {
+                            callback(null);
+                        }
+                        return;
+                    }
+
+                    const results = data.results || [];
+                    if (results.length === 0) {
+                        alisaLog('[API]', `No sources found for: ${currentTitle}`);
+                        debugLog('Empty results for variant', { title: currentTitle });
+                        currentIndex += 1;
+                        if (currentIndex < titles.length) {
+                            tryNextTitle();
+                        } else {
+                            callback(null);
+                        }
+                        return;
+                    }
+
+                    debugLog(`Found ${results.length} source(s)`, results.map(r => ({ 
+                        id: r.id, 
+                        title: r.title,
+                        type: r.type,
+                        quality: r.quality,
+                        link: r.link?.substring(0, 50) + '...'
+                    })));
+
+                    alisaLog('[API]', `Found ${results.length} result(s)`, { results: results.map(r => ({ id: r.id, title: r.title })) });
+                    callback(results, currentTitle);
+                },
+                onerror: (error) => {
+                    clearTimeout(timeoutId);
+                    const duration = Math.round(performance.now() - startTime);
+                    alisaLog('[ERROR]', 'API request error', { error: error.message || 'Unknown error' });
+                    debugLog('API request error', { 
+                        error: error.message, 
+                        duration: duration + 'ms',
+                        errorType: error.name || 'Unknown',
+                        titleUsed: currentTitle
+                    });
+                    currentIndex += 1;
+                    if (currentIndex < titles.length) {
+                        tryNextTitle();
+                    } else {
+                        callback(null);
+                    }
                 }
-                
-                debugLog(`Found ${results.length} source(s)`, results.map(r => ({ 
-                    id: r.id, 
-                    title: r.title,
-                    type: r.type,
-                    quality: r.quality,
-                    link: r.link?.substring(0, 50) + '...'
-                })));
-                
-                alisaLog('[API]', `Found ${results.length} result(s)`, { results: results.map(r => ({ id: r.id, title: r.title })) });
-                callback(results);
-            },
-            onerror: (error) => {
-                clearTimeout(timeoutId);
-                const duration = Math.round(performance.now() - startTime);
-                alisaLog('[ERROR]', 'API request error', { error: error.message || 'Unknown error' });
-                debugLog('API request error', { 
-                    error: error.message, 
-                    duration: duration + 'ms',
-                    errorType: error.name || 'Unknown'
-                });
-                callback(null);
-            }
-        });
+            });
+        };
+
+        tryNextTitle();
     }
     
     function renderSourceModal(results, title, episode) {
@@ -1045,10 +1113,10 @@
         
         debugLog('Episode info extracted', { episode, season, storageKey });
         
-        fetchExternalSources(title, async (results) => {
+        fetchExternalSources(title, async (results, usedTitle) => {
             if (!results || !results.length) {
                 alisaLog('[VIDEO]', 'No external sources found');
-                debugLog('No external sources found for this title');
+                debugLog('No external sources found for this title', { originalTitle: title });
                 showAlisaNotify('ℹ️ Внешних источников не найдено, используется оригинал');
                 return;
             }
@@ -1062,7 +1130,8 @@
                 savedId: savedId,
                 usesSaved: !!savedId,
                 selectedSourceId: selectedSource?.id,
-                totalResults: results.length
+                totalResults: results.length,
+                usedTitle: usedTitle || title
             });
             
             if (!selectedSource) {
@@ -1169,9 +1238,9 @@
         sourceBtn.textContent = '🎨 Выбрать источник';
         sourceBtn.addEventListener('click', () => {
             const title = document.querySelector('h1')?.textContent || document.title;
-            fetchExternalSources(title, (results) => {
+            fetchExternalSources(title, (results, usedTitle) => {
                 if (results) {
-                    renderSourceModal(results, title, null);
+                    renderSourceModal(results, usedTitle || title, null);
                     toggleSettingsPanel();
                 }
             });
