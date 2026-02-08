@@ -1196,7 +1196,7 @@
         block.appendChild(buttonsDiv);
         
         const targetPosition = container.querySelector('video') || container.querySelector('.post_media');
-        if (targetPosition) {
+        if (targetPosition && targetPosition.parentNode === container) {
             container.insertBefore(block, targetPosition.nextElementSibling || targetPosition);
         } else {
             container.appendChild(block);
