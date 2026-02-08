@@ -1195,9 +1195,12 @@
         block.appendChild(detailsDiv);
         block.appendChild(buttonsDiv);
         
-        const targetPosition = container.querySelector('video') || container.querySelector('.post_media');
-        if (targetPosition && targetPosition.parentNode === container) {
-            container.insertBefore(block, targetPosition.nextElementSibling || targetPosition);
+        const mediaContainer = document.querySelector('.post_media');
+        const videoNode = document.querySelector('video');
+        const anchorNode = mediaContainer || videoNode;
+        const anchorParent = anchorNode?.parentNode;
+        if (anchorNode && anchorParent) {
+            anchorParent.insertBefore(block, anchorNode.nextSibling);
         } else {
             container.appendChild(block);
         }
@@ -1813,7 +1816,7 @@
         infoBtn.textContent = 'ℹ️ О скрипте (консоль)';
         infoBtn.addEventListener('click', () => {
             console.log('%cJut.su Auto+ (Ultimate Edition)', 'background: #4caf50; color: #fff; padding: 8px; border-radius: 3px; font-weight: bold; font-size: 14px;');
-            console.log('Версия: 3.7.8');
+            console.log('Версия: 3.7.9');
             console.log('Авторы: Rodion, Diorhc, VakiKrin, nab, Alisa');
             console.log('Лицензия: MIT');
             console.log('════════════════════════════════════════');
@@ -1840,7 +1843,7 @@
             console.log('%cDEBUG: EXPORTABLE JSON', 'background: #9C27B0; color: #fff; padding: 4px; font-weight: bold;');
             console.log(JSON.stringify({
                 metadata: {
-                    version: '3.7.8',
+                    version: '3.7.9',
                     debugMode: window.debugMode,
                     timestamp: new Date().toISOString(),
                     url: window.location.href,
