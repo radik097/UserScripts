@@ -2,7 +2,7 @@
 // @name            Jut.su АвтоСкип+ (Ultimate Edition by description009)
 // @name:en         Jut.su Auto+ (Skip Intro, Next Episode, Preview, Download + External Sources)
 // @namespace       http://tampermonkey.net/
-// @version         3.7.1
+// @version         3.7.1+(1)
 // @description     Автоскип заставок, автопереход, предпросмотр серий, кнопка загрузки, интеграция внешних видео-ссылок, модальное окно выбора источников и панель настроек
 // @description:en  Auto-skip intros, next episode, previews, download button, external sources with source picker modal and settings panel
 // @author          Rodion (integrator), Diorhc (preview), VakiKrin (download), nab (external sources), Alisa (refactoring, logging & architecture)
@@ -954,12 +954,13 @@
 
         const providerOrder = getProviderOrder(settings.providerPrimary);
         
-        alisaLog('[API]', `Searching for sources (${titles.length} title variants, ${providerOrder.length} providers)`);
+        alisaLog('[API]', `🔍 Searching for sources (${titles.length} title variants, ${providerOrder.length} providers)`);
         showAlisaNotify('🔍 Поиск источников... пожалуйста, подождите');
 
         (async () => {
             let attemptCount = 0;
             const totalAttempts = titles.length * providerOrder.length;
+            const foundAnimeLog = [];
             
             for (const providerKey of providerOrder) {
                 for (const title of titles) {
@@ -973,12 +974,19 @@
 
                     const results = await fetchProviderResults(providerKey, title, episode);
                     if (results && results.length) {
+                        // Build detailed anime list log
+                        const animeList = results.map((r, idx) => `${idx + 1}. ${r.title || r.id} (${r.quality || 'auto'})`).join('; ');
+                        
                         alisaLog('[API]', `✅ Found ${results.length} source(s) via ${providerKey}`);
-                        debugLog('Source search successful', { 
+                        alisaLog('[API]', `📺 Anime sources: ${animeList}`);
+                        
+                        debugLog('🎯 Source search SUCCESSFUL', { 
                             provider: providerKey, 
-                            title: title,
+                            usedTitle: title,
                             resultsCount: results.length,
-                            attempts: attemptCount
+                            animeList: results.map(r => ({ title: r.title, quality: r.quality, type: r.type })),
+                            attempts: attemptCount,
+                            attemptPercentage: `${Math.round((attemptCount / totalAttempts) * 100)}%`
                         });
                         callback(results, title, providerKey);
                         return;
@@ -987,12 +995,14 @@
             }
 
             // No sources found after all attempts
-            alisaLog('[VIDEO]', 'No external sources found after exhausting all providers');
+            alisaLog('[VIDEO]', '❌ No external sources found after exhausting all providers');
+            alisaLog('[VIDEO]', `Tried ${totalAttempts} combinations: ${providerOrder.length} providers × ${titles.length} title variants`);
             showAlisaNotify('ℹ️ Внешние источники не найдены, используется оригинальный плеер');
-            debugLog('Source search exhausted', { 
+            debugLog('⚠️  Source search EXHAUSTED', { 
                 totalAttempts: totalAttempts, 
                 providers: providerOrder, 
-                titleVariants: titles.length 
+                titleVariants: titles.length,
+                message: 'All fallback combinations exhausted'
             });
             callback(null);
         })();
@@ -1356,7 +1366,7 @@
     }
     
     async function handleVideoFound(videoElement) {
-        debugLog('Video element found, starting source injection process', {
+        debugLog('🎬 Video element found, starting source injection process', {
             elementId: videoElement.id,
             elementClass: videoElement.className,
             parentElement: videoElement.parentElement?.className
@@ -1372,7 +1382,7 @@
             return;
         }
         
-        debugLog('Video title extracted', { title: title });
+        debugLog('📺 Video title extracted', { title: title });
         
         const { episode, season } = getEpisodeInfo();
         const storageKey = `alisa_src_${sanitizeTitle(title)}`;
@@ -1387,15 +1397,32 @@
                 return;
             }
             
+            // Log detailed anime list with counts
+            const animeCountLog = results.map((r, i) => `${i + 1}. ${r.title || r.id}`).join(', ');
+            alisaLog('[VIDEO]', `📺 Found ${results.length} anime source(s): ${animeCountLog}`);
+            debugLog(`✅ SUCCESS: Loaded ${results.length} anime source(s)`, {
+                foundCount: results.length,
+                animeList: results.map(r => ({
+                    title: r.title,
+                    provider: r.provider,
+                    quality: r.quality,
+                    type: r.type
+                })),
+                usedTitle: usedTitle || title,
+                usedProvider: usedProvider || 'unknown'
+            });
+            
             const savedId = localStorage.getItem(storageKey);
             const selectedSource = savedId 
                 ? results.find(r => r.id === savedId) 
                 : results[0];
             
             debugLog('Source selected', {
+                selectedSourceIndex: results.indexOf(selectedSource) + 1,
                 savedId: savedId,
                 usesSaved: !!savedId,
                 selectedSourceId: selectedSource?.id,
+                selectedSourceTitle: selectedSource?.title,
                 totalResults: results.length,
                 usedTitle: usedTitle || title,
                 usedProvider: usedProvider || selectedSource?.provider
@@ -1407,11 +1434,42 @@
                 return;
             }
             
+            // Remove old jut.su player and replace with new one
+            try {
+                debugLog('🗑️  Removing old Jut.su player');
+                
+                const oldVideo = videoElement;
+                const parentContainer = videoElement.parentElement;
+                
+                // Clear existing sources from old player
+                const existingSources = oldVideo.querySelectorAll('source');
+                existingSources.forEach(src => src.remove());
+                
+                // Create new video wrapper if needed
+                let playerContainer = parentContainer;
+                if (parentContainer.tagName === 'DIV' && parentContainer.children.length > 1) {
+                    // If container has other elements, create a fresh wrapper
+                    playerContainer = document.createElement('div');
+                    playerContainer.style.cssText = 'width: 100%; position: relative; background: #000;';
+                    parentContainer.insertBefore(playerContainer, oldVideo.nextSibling);
+                    if (oldVideo.parentElement === parentContainer) {
+                        parentContainer.removeChild(oldVideo);
+                    }
+                    playerContainer.appendChild(oldVideo);
+                }
+                
+                debugLog('✅ Old player removed, preparing new source injection');
+            } catch (removeError) {
+                if (window.debugMode) debugLog('⚠️  Error removing old player:', { error: removeError.message });
+                // Continue anyway
+            }
+            
             // Inject source and render buttons
             const sourceType = detectSourceType(selectedSource);
-            debugLog('Source type detected and injection starting', {
+            debugLog('🎯 Source type detected and injection starting', {
                 sourceType: sourceType,
-                selectedSourceLink: selectedSource.link?.substring(0, 100)
+                selectedSourceLink: selectedSource.link?.substring(0, 100),
+                selectedSourceQuality: selectedSource.quality
             });
             
             const urlMap = selectedSource.urls || { default: selectedSource.link };
@@ -1419,12 +1477,19 @@
                 ? injectDirectSources(videoElement, urlMap)
                 : injectIframeSource(videoElement.parentElement, selectedSource.link, title);
             
-            debugLog('Injection attempt result', { success: success });
+            debugLog('💾 Injection attempt result', { success: success, sourceType: sourceType });
             
             if (success) {
+                alisaLog('[VIDEO]', `✅ Successfully injected: ${results.length} anime source(s)`);
+                alisaLog('[VIDEO]', `Selected: «${selectedSource.title}» via ${selectedSource.provider}`);
                 showAlisaNotify('✅ Видео готово! Приятного просмотра... ♡');
                 renderSourceButtons(results, title, episode, storageKey);
-                alisaLog('[VIDEO]', `Source injected successfully: ${selectedSource.id}`);
+                debugLog('🎉 SUCCESS: Source injection complete', {
+                    selectedTitle: selectedSource.title,
+                    selectedProvider: selectedSource.provider,
+                    quality: selectedSource.quality,
+                    type: sourceType
+                });
             } else {
                 alisaLog('[ERROR]', 'Failed to inject source');
                 debugLog('Source injection failed');
@@ -1552,7 +1617,7 @@
         infoBtn.textContent = 'ℹ️ О скрипте (консоль)';
         infoBtn.addEventListener('click', () => {
             console.log('%cJut.su Auto+ (Ultimate Edition)', 'background: #4caf50; color: #fff; padding: 8px; border-radius: 3px; font-weight: bold; font-size: 14px;');
-            console.log('Версия: 3.6');
+            console.log('Версия: 3.7.1+(1)');
             console.log('Авторы: Rodion, Diorhc, VakiKrin, nab, Alisa');
             console.log('Лицензия: MIT');
             console.log('════════════════════════════════════════');
