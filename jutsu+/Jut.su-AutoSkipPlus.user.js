@@ -2,7 +2,7 @@
 // @name            Jut.su АвтоСкип+ (Ultimate Edition by description009)
 // @name:en         Jut.su Auto+ (Skip Intro, Next Episode, Preview, Download + External Sources)
 // @namespace       http://tampermonkey.net/
-// @version         3.7.5
+// @version         3.7.6
 // @description     Автоскип заставок, автопереход, предпросмотр серий, кнопка загрузки, интеграция внешних видео-ссылок, модальное окно выбора источников и панель настроек
 // @description:en  Auto-skip intros, next episode, previews, download button, external sources with source picker modal and settings panel
 // @author          Rodion (integrator), Diorhc (preview), VakiKrin (download), nab (external sources), Alisa (refactoring, logging & architecture)
@@ -386,6 +386,14 @@
         gogo: 'https://gogoanime.consumet.org'
     };
     const PROVIDER_ORDER = ['consumet', 'gogo', 'hianime'];
+    const PROVIDER_HEALTH_ENDPOINTS = {
+        consumet: 'https://api.consumet.org/anime/gogoanime/naruto?page=1',
+        gogo: 'https://gogoanime.consumet.org/search?keyw=naruto',
+        hianime: 'https://hianime-api.vercel.app/api/v2/hianime/search?q=one'
+    };
+    const PROVIDER_HEALTH_TTL = 5 * 60 * 1000;
+    const PROVIDER_HEALTH_TIMEOUT = 3500;
+    const providerHealthCache = new Map();
     
     function updateSetting(key, value) {
         settings[key] = value;
@@ -1065,6 +1073,85 @@
         if (providerKey === 'gogo') return fetchGogoResults(title, episode);
         return [];
     }
+    
+    function checkProviderHealth(providerKey) {
+        const endpoint = PROVIDER_HEALTH_ENDPOINTS[providerKey];
+        if (!endpoint) return Promise.resolve(true);
+        const cached = providerHealthCache.get(providerKey);
+        if (cached && Date.now() - cached.timestamp < PROVIDER_HEALTH_TTL) {
+            return Promise.resolve(cached.available);
+        }
+        return new Promise((resolve) => {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: endpoint,
+                timeout: PROVIDER_HEALTH_TIMEOUT,
+                headers: {
+                    'User-Agent': navigator.userAgent,
+                    'Referer': 'https://jut.su/',
+                    'Origin': 'https://jut.su',
+                    'Accept': 'application/json',
+                    'Accept-Language': 'en-US,en;q=0.9'
+                },
+                onload: (response) => {
+                    const ok = response.status >= 200 && response.status < 500;
+                    providerHealthCache.set(providerKey, {
+                        available: ok,
+                        timestamp: Date.now(),
+                        status: response.status
+                    });
+                    if (!ok) {
+                        alisaLog('[API]', `⚠️ ${providerKey} health check failed (${response.status})`);
+                    }
+                    if (window.debugMode) {
+                        debugLog('Provider health check', {
+                            provider: providerKey,
+                            status: response.status,
+                            available: ok
+                        });
+                    }
+                    resolve(ok);
+                },
+                onerror: (error) => {
+                    providerHealthCache.set(providerKey, {
+                        available: false,
+                        timestamp: Date.now(),
+                        status: 'error'
+                    });
+                    if (window.debugMode) {
+                        debugLog('Provider health error', {
+                            provider: providerKey,
+                            error: error?.error?.message || error?.message || 'Unknown network error'
+                        });
+                    }
+                    resolve(false);
+                },
+                ontimeout: () => {
+                    providerHealthCache.set(providerKey, {
+                        available: false,
+                        timestamp: Date.now(),
+                        status: 'timeout'
+                    });
+                    if (window.debugMode) {
+                        debugLog('Provider health timeout', { provider: providerKey });
+                    }
+                    resolve(false);
+                }
+            });
+        });
+    }
+    
+    async function getAvailableProviders(order) {
+        const checks = await Promise.all(order.map(async (providerKey) => ({
+            providerKey,
+            available: await checkProviderHealth(providerKey)
+        })));
+        const available = checks.filter((item) => item.available).map((item) => item.providerKey);
+        if (!available.length) {
+            alisaLog('[ERROR]', 'No providers available after health checks');
+        }
+        return available;
+    }
 
     function fetchExternalSources(titleOrTitles, callback) {
         const { episode } = getEpisodeInfo();
@@ -1079,18 +1166,25 @@
             return;
         }
 
-        const providerOrder = getProviderOrder(settings.providerPrimary);
-        const totalAttempts = titles.length * providerOrder.length;
-        const progress = showSearchProgress(totalAttempts, 0, 'Поиск источников...');
-        
-        alisaLog('[API]', `🔍 Searching for sources (${titles.length} title variants, ${providerOrder.length} providers)`);
-        showAlisaNotify('🔍 Поиск источников... пожалуйста, подождите');
-
         (async () => {
+            const providerOrder = getProviderOrder(settings.providerPrimary);
+            showAlisaNotify('🔍 Проверка доступности источников...');
+            const availableProviders = await getAvailableProviders(providerOrder);
+            if (!availableProviders.length) {
+                showAlisaNotify('⚠️ Внешние источники недоступны, используется оригинальный плеер');
+                callback(null);
+                return;
+            }
+            const totalAttempts = titles.length * availableProviders.length;
+            const progress = showSearchProgress(totalAttempts, 0, 'Поиск источников...');
+            
+            alisaLog('[API]', `🔍 Searching for sources (${titles.length} title variants, ${availableProviders.length} providers)`);
+            showAlisaNotify('🔍 Поиск источников... пожалуйста, подождите');
+
             let attemptCount = 0;
             const foundAnimeLog = [];
             
-            for (const providerKey of providerOrder) {
+            for (const providerKey of availableProviders) {
                 for (const title of titles) {
                     attemptCount++;
                     progress.update(attemptCount);
@@ -1128,11 +1222,11 @@
             // No sources found after all attempts
             progress.complete(false, 'Источники не найдены, используется оригинал');
             alisaLog('[VIDEO]', '❌ No external sources found after exhausting all providers');
-            alisaLog('[VIDEO]', `Tried ${totalAttempts} combinations: ${providerOrder.length} providers × ${titles.length} title variants`);
+            alisaLog('[VIDEO]', `Tried ${totalAttempts} combinations: ${availableProviders.length} providers × ${titles.length} title variants`);
             showAlisaNotify('ℹ️ Внешние источники не найдены, используется оригинальный плеер');
             debugLog('⚠️  Source search EXHAUSTED', { 
                 totalAttempts: totalAttempts, 
-                providers: providerOrder, 
+                providers: availableProviders, 
                 titleVariants: titles.length,
                 message: 'All fallback combinations exhausted'
             });
@@ -1830,7 +1924,7 @@
         infoBtn.textContent = 'ℹ️ О скрипте (консоль)';
         infoBtn.addEventListener('click', () => {
             console.log('%cJut.su Auto+ (Ultimate Edition)', 'background: #4caf50; color: #fff; padding: 8px; border-radius: 3px; font-weight: bold; font-size: 14px;');
-            console.log('Версия: 3.7.5');
+            console.log('Версия: 3.7.6');
             console.log('Авторы: Rodion, Diorhc, VakiKrin, nab, Alisa');
             console.log('Лицензия: MIT');
             console.log('════════════════════════════════════════');
@@ -1857,7 +1951,7 @@
             console.log('%cDEBUG: EXPORTABLE JSON', 'background: #9C27B0; color: #fff; padding: 4px; font-weight: bold;');
             console.log(JSON.stringify({
                 metadata: {
-                    version: '3.7.5',
+                    version: '3.7.6',
                     debugMode: window.debugMode,
                     timestamp: new Date().toISOString(),
                     url: window.location.href,
