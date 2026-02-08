@@ -15,6 +15,9 @@
 // @downloadURL     https://raw.githubusercontent.com/radik097/UserScripts/refs/heads/main/jutsu+/Jut.su-AutoSkipPlus.user.js
 // @updateURL       https://raw.githubusercontent.com/radik097/UserScripts/refs/heads/main/jutsu+/Jut.su-AutoSkipPlus.user.js
 // @connect         andb.workers.dev
+// @connect         api.consumet.org
+// @connect         hianime-api.vercel.app
+// @connect         gogoanime.consumet.org
 // @run-at          document-start
 // ==/UserScript==
  
@@ -202,6 +205,87 @@
 
         return variants.filter(Boolean);
     }
+
+    function getProviderOrder(primary) {
+        const order = PROVIDER_ORDER.slice();
+        const normalized = order.includes(primary) ? primary : 'consumet';
+        return [normalized, ...order.filter((item) => item !== normalized)];
+    }
+
+    function guessMimeType(url) {
+        const lower = (url || '').toLowerCase();
+        if (lower.includes('.m3u8')) return 'application/x-mpegURL';
+        if (lower.includes('.mp4')) return 'video/mp4';
+        return 'video/mp4';
+    }
+
+    function pickEpisode(episodes, episodeNumber) {
+        if (!Array.isArray(episodes) || !episodes.length) return null;
+        if (episodeNumber) {
+            const byNumber = episodes.find((ep) => String(ep.number ?? ep.episode ?? ep.episodeNumber) === String(episodeNumber));
+            return byNumber || episodes[0];
+        }
+        return episodes[0];
+    }
+
+    function buildUrlMapFromSources(sources) {
+        const urls = {};
+        (sources || []).forEach((source) => {
+            const quality = source.quality || (source.isM3U8 ? 'hls' : 'default');
+            if (source.url && !urls[quality]) {
+                urls[quality] = source.url;
+            }
+        });
+        if (!urls.default && sources?.[0]?.url) {
+            urls.default = sources[0].url;
+        }
+        return urls;
+    }
+
+    function gmRequestJson(url, contextLabel) {
+        return new Promise((resolve) => {
+            const startTime = performance.now();
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url,
+                timeout: API_TIMEOUT,
+                onload: (response) => {
+                    const duration = Math.round(performance.now() - startTime);
+                    debugLog('API response received', {
+                        context: contextLabel,
+                        status: response.status,
+                        duration: `${duration}ms`,
+                        responseLength: response.responseText?.length,
+                        url: url
+                    });
+
+                    if (window.debugMode) {
+                        console.log('%c[RAW RESPONSE]', 'background: #2196F3; color: #fff; padding: 2px 6px; border-radius: 3px; font-weight: bold;');
+                        console.log(response.responseText?.substring(0, 1000) || 'No response');
+                    }
+
+                    const data = validateAPIResponse(response);
+                    if (!data) {
+                        resolve(null);
+                        return;
+                    }
+
+                    resolve(data);
+                },
+                onerror: (error) => {
+                    const duration = Math.round(performance.now() - startTime);
+                    alisaLog('[ERROR]', 'API request error', { error: error.message || 'Unknown error' });
+                    debugLog('API request error', {
+                        context: contextLabel,
+                        error: error.message,
+                        duration: `${duration}ms`,
+                        url: url
+                    });
+                    resolve(null);
+                }
+            });
+        });
+    }
  
     // ═══════════════════════════════════════════════════════════════════════════════
     // SETTINGS MANAGEMENT
@@ -213,11 +297,18 @@
         previewEnabled: GM_getValue('previewEnabled', true),
         downloadButton: GM_getValue('downloadButton', true),
         externalInject: GM_getValue('externalInject', true),
-        debugMode: GM_getValue('debugMode', false)
+        debugMode: GM_getValue('debugMode', false),
+        providerPrimary: GM_getValue('providerPrimary', 'consumet')
     };
     
     const API_URL = 'https://api.andb.workers.dev/search';
     const API_TIMEOUT = 5000;
+    const PROVIDER_BASE_URLS = {
+        consumet: 'https://api.consumet.org',
+        hianime: 'https://hianime-api.vercel.app',
+        gogo: 'https://gogoanime.consumet.org'
+    };
+    const PROVIDER_ORDER = ['consumet', 'hianime', 'gogo'];
     
     function updateSetting(key, value) {
         settings[key] = value;
@@ -510,14 +601,14 @@
                 const url = urls[quality] || urls['default'] || Object.values(urls)[0];
                 if (url) {
                     source.src = url;
-                    source.type = 'video/mp4';
+                    source.type = guessMimeType(url);
                     source.dataset.quality = quality;
                     sourceContainer.appendChild(source);
                     injectedCount++;
                     debugLog(`Source element created and injected`, {
                         quality: quality,
                         url: url.substring(0, 100) + (url.length > 100 ? '...' : ''),
-                        type: 'video/mp4'
+                        type: source.type
                     });
                     alisaLog('[VIDEO]', `Source injected: ${quality} → ${url.substring(0, 50)}...`);
                 }
