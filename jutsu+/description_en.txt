@@ -1,0 +1,71 @@
+## 🌀 Jut.su Auto+ — Ultimate Edition v3.8.2
+
+### 📋 Description
+
+Powerful Tampermonkey userscript for [Jut.su](https://jut.su) with full viewing automation, external sources integration and advanced UI. Over 8 features:
+
+* 🔄 Auto skip intros
+* ⏭️ Auto switch to next episode
+* 👁️ Episode preview on hover
+* 📥 Download button for 1080p videos
+* 🌐 **External sources** (Consumet API: gogoanime, animekai, aniwatch)
+* 🎨 **Modal source picker** for dub/quality selection
+* ⚙️ **Settings panel** with graphical interface
+* 🔧 **Debug Mode** for developers
+
+### ⚙️ Features
+
+#### Core Features
+* **Intro Skipping:** Automatically clicks the "Skip Intro" button when it appears
+* **Auto Next:** Jumps to the next episode when the video ends
+* **Episode Preview:** Shows episode title and thumbnail when hovering over episode links
+* **Download Button:** Adds a download button below the video (1080p)
+
+#### Advanced Features
+* **External Sources:** Consumet API integration (gogoanime, animekai, aniwatch)
+* **Smart Fallback:** 3 providers × 3 servers × 3 categories = up to 27 search attempts
+* **Modal Picker:** Select dub, quality and source with search functionality
+* **Smart Caching:** Remembers your preferred dub for each anime
+* **Settings Panel:** Graphical interface for managing all features
+* **Debug Mode:** Detailed operation logs in console (F12)
+* **Progress Bar:** Real-time visualization of source search progress
+* **No Sources Block:** Informative message when sources are not found
+
+### 🛠 Installation
+
+1. Install the [Tampermonkey extension](https://www.tampermonkey.net/)
+2. Go to [script page on GitHub](https://github.com/radik097/UserScripts/raw/refs/heads/main/jutsu+/Jut.su-AutoSkipPlus.user.js)
+3. Tampermonkey will prompt installation — click "Install"
+4. Visit [Jut.su](https://jut.su) — the script activates automatically
+5. Open settings panel (⚙️ in top right corner) for configuration
+
+### ✅ Compatibility
+
+* **Browsers:** Chrome, Firefox, Edge (any browser with Tampermonkey)
+* **Site:** Works exclusively on [Jut.su](https://jut.su)
+* **API:** Consumet API (gogoanime, animekai, aniwatch)
+* **Version:** 3.8.2 (February 2026)
+
+### 👨‍💻 Authors & Contributors
+
+* **Rodion (description009):** Integration, architecture, external sources
+* **Diorhc:** Episode preview system
+* **VakiKrin:** Download button
+* **nab:** External sources concept
+* **Alisa:** Refactoring, logging, Core Library architecture
+
+### 📚 Technical Information
+
+* **Architecture:** Core Library (430 lines) + UI Loader (1660 lines)
+* **API:** Consumet API with health checks and caching
+* **Logging:** Centralized system with categories and timestamps
+* **Observers:** Manager to prevent memory leaks
+* **Fallback Chain:** Provider → Server → Category → Episode
+
+### 🐛 Debugging
+
+1. Open settings panel (⚙️)
+2. Enable **Debug Mode**
+3. Open browser console (F12)
+4. All operations will be logged with details
+5. Access logs: `window.alisaLogs`

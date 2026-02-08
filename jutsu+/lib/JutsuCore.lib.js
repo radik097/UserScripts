@@ -1,3 +1,12 @@
+// ==UserScript==
+// @name            Jut.su Auto+ Core Library
+// @namespace       http://tampermonkey.net/
+// @version         1.0.0
+// @description     Core logic for Jut.su Auto+ (API, Observers, Title Parsing)
+// @author          Rodion
+// @license         MIT
+// ==/UserScript==
+
 // ============================================================================
 // JUT.SU AUTO+ CORE LIBRARY (Logic & API)
 // ============================================================================
