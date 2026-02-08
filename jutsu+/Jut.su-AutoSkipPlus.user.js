@@ -2,7 +2,7 @@
 // @name            Jut.su АвтоСкип+ (Ultimate Edition by description009)
 // @name:en         Jut.su Auto+ (Skip Intro, Next Episode, Preview, Download + External Sources)
 // @namespace       http://tampermonkey.net/
-// @version         3.7.6
+// @version         3.7.8
 // @description     Автоскип заставок, автопереход, предпросмотр серий, кнопка загрузки, интеграция внешних видео-ссылок, модальное окно выбора источников и панель настроек
 // @description:en  Auto-skip intros, next episode, previews, download button, external sources with source picker modal and settings panel
 // @author          Rodion (integrator), Diorhc (preview), VakiKrin (download), nab (external sources), Alisa (refactoring, logging & architecture)
@@ -15,9 +15,7 @@
 // @downloadURL     https://github.com/radik097/UserScripts/raw/refs/heads/main/jutsu+/Jut.su-AutoSkipPlus.user.js
 // @updateURL       https://github.com/radik097/UserScripts/raw/refs/heads/main/jutsu+/Jut.su-AutoSkipPlus.user.js
 // @connect         andb.workers.dev
-// @connect         api.consumet.org
-// @connect         hianime-api.vercel.app
-// @connect         gogoanime.consumet.org
+// @connect         consumet-api-yij6.onrender.com
 // @run-at          document-start
 // ==/UserScript==
  
@@ -381,15 +379,11 @@
     const API_URL = 'https://api.andb.workers.dev/search';
     const API_TIMEOUT = 5000;
     const PROVIDER_BASE_URLS = {
-        consumet: 'https://api.consumet.org',
-        hianime: 'https://hianime-api.vercel.app',
-        gogo: 'https://gogoanime.consumet.org'
+        consumet: 'https://consumet-api-yij6.onrender.com'
     };
-    const PROVIDER_ORDER = ['consumet', 'gogo', 'hianime'];
+    const PROVIDER_ORDER = ['consumet'];
     const PROVIDER_HEALTH_ENDPOINTS = {
-        consumet: 'https://api.consumet.org/anime/gogoanime/naruto?page=1',
-        gogo: 'https://gogoanime.consumet.org/search?keyw=naruto',
-        hianime: 'https://hianime-api.vercel.app/api/v2/hianime/search?q=one'
+        consumet: 'https://consumet-api-yij6.onrender.com/anime/gogoanime/naruto?page=1'
     };
     const PROVIDER_HEALTH_TTL = 5 * 60 * 1000;
     const PROVIDER_HEALTH_TIMEOUT = 3500;
@@ -420,12 +414,8 @@
     }
 
     function cycleProviderPrimary() {
-        const order = PROVIDER_ORDER.slice();
-        const currentIndex = order.indexOf(settings.providerPrimary);
-        const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % order.length;
-        const nextProvider = order[nextIndex];
-        updateSetting('providerPrimary', nextProvider);
-        showAlisaNotify(`Провайдер источников: ${nextProvider}`);
+        updateSetting('providerPrimary', 'consumet');
+        showAlisaNotify('Провайдер источников: consumet');
     }
     
     function registerMenu() {
@@ -436,7 +426,7 @@
         GM_registerMenuCommand(`Превью: ${settings.previewEnabled ? '✅' : '❌'}`, () => updateSetting('previewEnabled', !settings.previewEnabled));
         GM_registerMenuCommand(`Загрузка: ${settings.downloadButton ? '✅' : '❌'}`, () => updateSetting('downloadButton', !settings.downloadButton));
         GM_registerMenuCommand(`Внешн. источники: ${settings.externalInject ? '✅' : '❌'}`, () => updateSetting('externalInject', !settings.externalInject));
-        GM_registerMenuCommand(`Провайдер: ${settings.providerPrimary}`, () => cycleProviderPrimary());
+        GM_registerMenuCommand('Провайдер: consumet', () => cycleProviderPrimary());
         const sep2 = GM_registerMenuCommand('────────────────────', () => {});
         GM_registerMenuCommand(`🔧 Debug Mode: ${settings.debugMode ? '🟢 ON' : '⚫ OFF'}`, () => updateSetting('debugMode', !settings.debugMode));
     }
@@ -753,7 +743,7 @@
 
         const providerSelect = panel.querySelector('[data-provider-select]');
         if (providerSelect) {
-            providerSelect.value = settings.providerPrimary;
+            providerSelect.value = 'consumet';
         }
     }
 
@@ -849,40 +839,37 @@
     
     function injectIframeSource(container, iframeUrl, title = '') {
         try {
+            const target = document.evaluate(
+                '/html/body/div[5]/div[1]/div/div/div[4]',
+                document,
+                null,
+                XPathResult.FIRST_ORDERED_NODE_TYPE,
+                null
+            ).singleNodeValue;
+
+            if (!target || !target.parentNode) {
+                alisaLog('[ERROR]', 'Iframe injection target not found by XPath');
+                debugLog('Iframe injection target missing', { xpath: '/html/body/div[5]/div[1]/div/div/div[4]' });
+                return false;
+            }
+
             debugLog('injectIframeSource called', {
                 url: iframeUrl.substring(0, 100) + (iframeUrl.length > 100 ? '...' : ''),
-                title: title,
-                containerClass: container.className
+                title: title
             });
-            
-            // Remove existing video elements
-            const existingVideo = container.querySelector('video');
-            if (existingVideo) {
-                existingVideo.style.display = 'none';
-                debugLog('Existing video element hidden');
-            }
-            
-            // Create iframe
+
             const iframe = document.createElement('iframe');
             iframe.src = iframeUrl;
-            iframe.style.cssText = 'width:100%; height:100%; border:none; background:#000; position:absolute; top:0; left:0; z-index:1;';
+            iframe.style.cssText = 'width:100%; height:100%; border:none; background:#000;';
             iframe.allow = 'fullscreen; autoplay; encrypted-media';
             iframe.title = title || 'Video Player';
-            
-            debugLog('iframe element created', {
-                src: iframeUrl.substring(0, 100),
-                allow: iframe.allow,
-                title: iframe.title
-            });
-            
-            container.style.position = 'relative';
-            container.appendChild(iframe);
-            
-            debugLog('iframe appended to container', {
-                parentPositionSet: true,
-                iframeCount: container.querySelectorAll('iframe').length
-            });
-            
+
+            const wrapper = document.createElement('div');
+            wrapper.style.cssText = 'width: 100%; height: 100%; position: relative; background: #000;';
+            wrapper.appendChild(iframe);
+
+            target.parentNode.replaceChild(wrapper, target);
+
             alisaLog('[VIDEO]', `Iframe injected: ${iframeUrl.substring(0, 50)}...`);
             return true;
         } catch (e) {
@@ -966,111 +953,8 @@
         }
     }
 
-    async function fetchHianimeResults(title, episode) {
-        try {
-            const baseUrl = PROVIDER_BASE_URLS.hianime;
-            const searchUrl = `${baseUrl}/api/v2/hianime/search?q=${encodeURIComponent(title)}`;
-            const searchData = await gmRequestJson(searchUrl, 'hianime.search');
-            const searchResults = searchData?.data?.results || searchData?.results || [];
-            if (!searchResults.length) return [];
-
-            const results = [];
-            const limitedResults = searchResults.slice(0, 3);
-
-            for (const item of limitedResults) {
-                try {
-                    const infoUrl = `${baseUrl}/api/v2/hianime/anime/${encodeURIComponent(item.id)}`;
-                    const infoData = await gmRequestJson(infoUrl, 'hianime.info');
-                    const episodes = infoData?.data?.episodes || infoData?.episodes || [];
-                    const episodeItem = pickEpisode(episodes, episode);
-                    const episodeId = episodeItem?.episodeId || episodeItem?.id;
-                    if (!episodeId) continue;
-
-                    const watchUrl = `${baseUrl}/api/v2/hianime/episode/sources?episodeId=${encodeURIComponent(episodeId)}`;
-                    const watchData = await gmRequestJson(watchUrl, 'hianime.watch');
-                    const sources = watchData?.data?.sources || watchData?.sources || [];
-                    if (!sources.length) continue;
-
-                    const urls = buildUrlMapFromSources(sources.map((source) => ({
-                        url: source.url,
-                        quality: source.quality,
-                        isM3U8: source.isM3U8
-                    })));
-
-                    results.push({
-                        id: item.id,
-                        title: item.title || item.name,
-                        provider: 'hianime',
-                        type: 'stream',
-                        link: urls.default,
-                        urls: urls,
-                        quality: sources[0]?.quality || 'auto'
-                    });
-                } catch (itemError) {
-                    if (window.debugMode) debugLog('Hianime item processing error', { title: item.title, error: itemError.message });
-                    continue;
-                }
-            }
-
-            return results;
-        } catch (err) {
-            if (window.debugMode) debugLog('Hianime provider error', { error: err.message });
-            return [];
-        }
-    }
-
-    async function fetchGogoResults(title, episode) {
-        try {
-            const baseUrl = PROVIDER_BASE_URLS.gogo;
-            const searchUrl = `${baseUrl}/search?keyw=${encodeURIComponent(title)}`;
-            const searchData = await gmRequestJson(searchUrl, 'gogo.search');
-            const searchResults = searchData?.results || searchData || [];
-            if (!searchResults.length) return [];
-
-            const results = [];
-            const limitedResults = searchResults.slice(0, 3);
-
-            for (const item of limitedResults) {
-                try {
-                    const infoUrl = `${baseUrl}/anime-details/${encodeURIComponent(item.id)}`;
-                    const infoData = await gmRequestJson(infoUrl, 'gogo.info');
-                    const episodes = infoData?.episodes || [];
-                    const episodeItem = pickEpisode(episodes, episode);
-                    const episodeId = episodeItem?.episodeId || episodeItem?.id;
-                    if (!episodeId) continue;
-
-                    const watchUrl = `${baseUrl}/vidcdn/watch/${encodeURIComponent(episodeId)}`;
-                    const watchData = await gmRequestJson(watchUrl, 'gogo.watch');
-                    const sources = watchData?.sources || [];
-                    if (!sources.length) continue;
-
-                    const urls = buildUrlMapFromSources(sources);
-                    results.push({
-                        id: item.id,
-                        title: item.title,
-                        provider: 'gogo',
-                        type: 'stream',
-                        link: urls.default,
-                        urls: urls,
-                        quality: sources[0]?.quality || 'auto'
-                    });
-                } catch (itemError) {
-                    if (window.debugMode) debugLog('Gogo item processing error', { title: item.title, error: itemError.message });
-                    continue;
-                }
-            }
-
-            return results;
-        } catch (err) {
-            if (window.debugMode) debugLog('Gogo provider error', { error: err.message });
-            return [];
-        }
-    }
-
     async function fetchProviderResults(providerKey, title, episode) {
         if (providerKey === 'consumet') return fetchConsumetResults(title, episode);
-        if (providerKey === 'hianime') return fetchHianimeResults(title, episode);
-        if (providerKey === 'gogo') return fetchGogoResults(title, episode);
         return [];
     }
     
@@ -1165,6 +1049,14 @@
             callback(null);
             return;
         }
+
+        alisaLog('[VIDEO]', 'External sources search is disabled (in development)');
+        showAlisaNotify('🧪 Внешние источники пока в разработке');
+        if (window.debugMode) {
+            debugLog('External source search stub', { titleVariants: titles.length });
+        }
+        callback(null);
+        return;
 
         (async () => {
             const providerOrder = getProviderOrder(settings.providerPrimary);
@@ -1261,7 +1153,7 @@
         detailsDiv.className = 'alisa-no-sources-details';
         detailsDiv.innerHTML = `
             <div style="margin-bottom: 8px;">📺 <strong>Возможные причины:</strong></div>
-            <div>• Аниме еще не добавлено в базы провайдеров (Consumet, Hianime, Gogo)</div>
+            <div>• Аниме еще не добавлено в базу провайдера (Consumet)</div>
             <div>• Название аниме не совпадает с названиями в базах</div>
             <div>• API провайдеров временно недоступны или возвращают ошибки</div>
             <div>• Эпизод еще не загружен на внешних источниках</div>
@@ -1780,9 +1672,8 @@
             });
             
             const urlMap = selectedSource.urls || { default: selectedSource.link };
-            const success = sourceType === 'direct'
-                ? injectDirectSources(videoElement, urlMap)
-                : injectIframeSource(videoElement.parentElement, selectedSource.link, title);
+            const iframeUrl = selectedSource.link || urlMap.default || Object.values(urlMap)[0];
+            const success = injectIframeSource(videoElement.parentElement, iframeUrl, title);
             
             debugLog('💾 Injection attempt result', { success: success, sourceType: sourceType });
             
@@ -1841,7 +1732,7 @@
             { key: 'autoNext', label: '▶️ Автопереход на след. эпизод' },
             { key: 'previewEnabled', label: '🖼️ Превью эпизодов' },
             { key: 'downloadButton', label: '⬇️ Кнопка скачивания' },
-            { key: 'externalInject', label: '🌐 Внешние источники' },
+            { key: 'externalInject', label: '🌐 Внешние источники (в разработке)' },
             { key: 'debugMode', label: '🔧 Debug Mode' }
         ];
         
@@ -1866,7 +1757,7 @@
             panel.appendChild(item);
         });
 
-        // Provider selector
+        // Provider selector (single tested provider)
         const providerItem = document.createElement('div');
         providerItem.className = 'alisa-setting-item';
         providerItem.style.flexDirection = 'column';
@@ -1880,14 +1771,12 @@
         providerSelect.className = 'alisa-select';
         providerSelect.dataset.providerSelect = 'true';
 
-        PROVIDER_ORDER.forEach((providerKey) => {
-            const option = document.createElement('option');
-            option.value = providerKey;
-            option.textContent = providerKey === 'consumet' ? 'Consumet' : providerKey === 'hianime' ? 'Hianime' : 'Gogo';
-            providerSelect.appendChild(option);
-        });
+        const option = document.createElement('option');
+        option.value = 'consumet';
+        option.textContent = 'Consumet';
+        providerSelect.appendChild(option);
 
-        providerSelect.value = settings.providerPrimary;
+        providerSelect.value = 'consumet';
         providerSelect.addEventListener('change', (e) => {
             updateSetting('providerPrimary', e.target.value);
         });
@@ -1924,7 +1813,7 @@
         infoBtn.textContent = 'ℹ️ О скрипте (консоль)';
         infoBtn.addEventListener('click', () => {
             console.log('%cJut.su Auto+ (Ultimate Edition)', 'background: #4caf50; color: #fff; padding: 8px; border-radius: 3px; font-weight: bold; font-size: 14px;');
-            console.log('Версия: 3.7.6');
+            console.log('Версия: 3.7.8');
             console.log('Авторы: Rodion, Diorhc, VakiKrin, nab, Alisa');
             console.log('Лицензия: MIT');
             console.log('════════════════════════════════════════');
@@ -1943,15 +1832,15 @@
                 'Download': settings.downloadButton,
                 'External Inject': settings.externalInject,
                 'Debug Mode': settings.debugMode,
-                'Provider Primary': settings.providerPrimary,
-                'Provider Order': getProviderOrder(settings.providerPrimary).join(' → ')
+                'Provider Primary': 'consumet',
+                'Provider Order': 'consumet'
             });
             console.log('%cПОЛНЫЙ ЛОГ', 'background: #FF5722; color: #fff; padding: 4px; font-weight: bold;');
             console.table(window.alisaLogs);
             console.log('%cDEBUG: EXPORTABLE JSON', 'background: #9C27B0; color: #fff; padding: 4px; font-weight: bold;');
             console.log(JSON.stringify({
                 metadata: {
-                    version: '3.7.6',
+                    version: '3.7.8',
                     debugMode: window.debugMode,
                     timestamp: new Date().toISOString(),
                     url: window.location.href,
