@@ -2,7 +2,7 @@
 // @name            Jut.su АвтоСкип+ (Ultimate Edition by description009)
 // @name:en         Jut.su Auto+ (Skip Intro, Next Episode, Preview, Download + External Sources)
 // @namespace       http://tampermonkey.net/
-// @version         3.7.2
+// @version         3.7.3
 // @description     Автоскип заставок, автопереход, предпросмотр серий, кнопка загрузки, интеграция внешних видео-ссылок, модальное окно выбора источников и панель настроек
 // @description:en  Auto-skip intros, next episode, previews, download button, external sources with source picker modal and settings panel
 // @author          Rodion (integrator), Diorhc (preview), VakiKrin (download), nab (external sources), Alisa (refactoring, logging & architecture)
@@ -579,6 +579,43 @@
             }
             .alisa-modal-item-title { font-weight: bold; margin-bottom: 3px; }
             .alisa-modal-item-info { color: #999; font-size: 11px; }
+            
+            /* No Sources Found Block */
+            .alisa-no-sources-block {
+                position: relative; width: 100%; height: auto; background: #1a1a1a;
+                border: 2px solid #ff6b6b; border-radius: 8px; padding: 30px;
+                color: #fff; text-align: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                box-shadow: inset 0 0 15px rgba(255, 107, 107, 0.1);
+                margin: 20px 0;
+            }
+            .alisa-no-sources-title {
+                font-size: 24px; font-weight: bold; color: #ff6b6b; margin-bottom: 15px;
+                display: flex; align-items: center; justify-content: center; gap: 10px;
+            }
+            .alisa-no-sources-message {
+                font-size: 14px; color: #bbb; margin-bottom: 15px; line-height: 1.6;
+            }
+            .alisa-no-sources-details {
+                background: #2a2c2b; border: 1px solid #444; border-radius: 6px; padding: 15px;
+                margin: 15px 0; text-align: left; font-size: 12px; color: #aaa;
+                max-height: 200px; overflow-y: auto;
+            }
+            .alisa-no-sources-code {
+                background: #1a1a1a; border-left: 3px solid #4caf50; padding: 8px 12px;
+                margin: 8px 0; font-family: 'Courier New', monospace; font-size: 11px;
+                color: #4caf50; word-break: break-all;
+            }
+            .alisa-no-sources-buttons {
+                display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 20px;
+            }
+            .alisa-no-sources-btn {
+                background: #4caf50; color: #fff; border: none;
+                padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold;
+                font-size: 13px; transition: background 0.2s;
+            }
+            .alisa-no-sources-btn:hover { background: #45a049; }
+            .alisa-no-sources-btn.secondary { background: #444; color: #fff; }
+            .alisa-no-sources-btn.secondary:hover { background: #555; }
         `;
         document.head.appendChild(style);
         alisaLog('[UI]', 'Global styles injected');
@@ -1008,6 +1045,86 @@
         })();
     }
     
+    function renderNoSourcesBlock(title, episode, storageKey) {
+        const container = assertElement('.post_media') || assertElement('.post_content') || assertElement('video')?.parentElement;
+        if (!container) return;
+        
+        // Remove any existing no-sources block
+        const existingBlock = container.querySelector('.alisa-no-sources-block');
+        if (existingBlock) existingBlock.remove();
+        
+        const block = document.createElement('div');
+        block.className = 'alisa-no-sources-block';
+        
+        const titleDiv = document.createElement('div');
+        titleDiv.className = 'alisa-no-sources-title';
+        titleDiv.innerHTML = '❌ Источники не найдены';
+        
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'alisa-no-sources-message';
+        messageDiv.innerHTML = `
+            <span>К сожалению, внешние ссылки на аниме <strong>"${title.substring(0, 60)}${title.length > 60 ? '...' : ''}"</strong> не найдены.</span>
+            <br><br>
+            <span>Это может означать:</span>
+        `;
+        
+        const detailsDiv = document.createElement('div');
+        detailsDiv.className = 'alisa-no-sources-details';
+        detailsDiv.innerHTML = `
+            <div style="margin-bottom: 8px;">📺 <strong>Возможные причины:</strong></div>
+            <div>• Аниме еще не добавлено в базы провайдеров (Consumet, Hianime, Gogo)</div>
+            <div>• Название аниме не совпадает с названиями в базах</div>
+            <div>• API провайдеров временно недоступны или возвращают ошибки</div>
+            <div>• Эпизод еще не загружен на внешних источниках</div>
+            <br>
+            <div style="margin-bottom: 8px;">🔄 <strong>Что попробовать:</strong></div>
+            <div>• Обновите страницу и повторите попытку</div>
+            <div>• Используйте оригинальный плеер Jut.su</div>
+            <div>• Включите Debug Mode в панели настроек для подробных логов</div>
+            <div>• Проверьте консоль браузера (F12) для большей информации</div>
+            <br>
+            <div style="margin-bottom: 8px;">📝 <strong>Информация о поиске:</strong></div>
+            <div>Названия опробованы: <strong>${title}</strong></div>
+            <div>Установка: Эпизод <strong>${episodeNumber || '—'}</strong>, Сезон <strong>${seasonNumber || '—'}</strong></div>
+        `.replace('${episodeNumber}', episode || '?').replace('${seasonNumber}', 'N/A');
+        
+        const buttonsDiv = document.createElement('div');
+        buttonsDiv.className = 'alisa-no-sources-buttons';
+        
+        const retryBtn = document.createElement('button');
+        retryBtn.className = 'alisa-no-sources-btn';
+        retryBtn.textContent = '🔄 Повторить поиск';
+        retryBtn.addEventListener('click', () => {
+            location.reload();
+        });
+        
+        const debugBtn = document.createElement('button');
+        debugBtn.className = 'alisa-no-sources-btn secondary';
+        debugBtn.textContent = '🔧 Включить Debug Mode';
+        debugBtn.addEventListener('click', () => {
+            updateSetting('debugMode', true);
+            showAlisaNotify('✅ Debug Mode включен! Смотрите консоль (F12)');
+        });
+        
+        buttonsDiv.appendChild(retryBtn);
+        buttonsDiv.appendChild(debugBtn);
+        
+        block.appendChild(titleDiv);
+        block.appendChild(messageDiv);
+        block.appendChild(detailsDiv);
+        block.appendChild(buttonsDiv);
+        
+        const targetPosition = container.querySelector('video') || container.querySelector('.post_media');
+        if (targetPosition) {
+            container.insertBefore(block, targetPosition.nextElementSibling || targetPosition);
+        } else {
+            container.appendChild(block);
+        }
+        
+        alisaLog('[UI]', 'No sources found block rendered');
+        debugLog('No sources block displayed for user', { title: title });
+    }
+    
     function renderSourceModal(results, title, episode) {
         if (!results || !results.length) return;
         
@@ -1393,7 +1510,8 @@
             if (!results || !results.length) {
                 alisaLog('[VIDEO]', 'No external sources found');
                 debugLog('No external sources found for this title', { originalTitle: title });
-                showAlisaNotify('ℹ️ Внешних источников не найдено, используется оригинал');
+                showAlisaNotify('ℹ️ Источники не найдены — смотрите информацию на странице');
+                renderNoSourcesBlock(title, episode, storageKey);
                 return;
             }
             
