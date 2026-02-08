@@ -2,7 +2,7 @@
 // @name            Jut.su АвтоСкип+ (Ultimate Edition by description009)
 // @name:en         Jut.su Auto+ (Skip Intro, Next Episode, Preview, Download + External Sources)
 // @namespace       http://tampermonkey.net/
-// @version         3.7
+// @version         3.7.1
 // @description     Автоскип заставок, автопереход, предпросмотр серий, кнопка загрузки, интеграция внешних видео-ссылок, модальное окно выбора источников и панель настроек
 // @description:en  Auto-skip intros, next episode, previews, download button, external sources with source picker modal and settings panel
 // @author          Rodion (integrator), Diorhc (preview), VakiKrin (download), nab (external sources), Alisa (refactoring, logging & architecture)
@@ -41,11 +41,12 @@
         };
         window.alisaLogs.push(logEntry);
         
-        // Immediate console output in debug mode
-        if (window.debugMode) {
+        // Always log errors and API success, only debug logs in debug mode
+        const shouldLog = window.debugMode || category.includes('ERROR') || category.includes('[API]');
+        if (shouldLog && (category.includes('ERROR') || category.includes('[API]') || category.includes('[VIDEO]'))) {
             const style = `color: ${category.includes('ERROR') ? '#ff6b6b' : '#81a834'}; font-weight: bold;`;
             console.log(`%c[${timestamp}] ${category}%c ${message}`, style, 'color: inherit;');
-            if (data) console.log(data);
+            if (data && window.debugMode) console.log(data);
         }
     }
     
@@ -122,36 +123,33 @@
     // ═══════════════════════════════════════════════════════════════════════════════
     
     function validateAPIResponse(response) {
-        debugLog('validateAPIResponse called', { status: response?.status, hasResponseText: !!response?.responseText });
-        
         if (!response || !response.responseText) {
-            alisaLog('[ERROR]', 'API response is empty or missing');
-            debugLog('Response validation failed: empty or missing', { response: response });
+            if (window.debugMode) debugLog('Response validation failed: empty or missing');
             return null;
         }
         
         const text = response.responseText.trim();
         if (!text) {
-            alisaLog('[ERROR]', 'API response text is empty');
-            debugLog('Response text is empty after trim');
+            if (window.debugMode) debugLog('Response text is empty after trim');
             return null;
         }
         
-        debugLog('Server response status', { status: response.status, contentLength: text.length });
-        
+        // Check HTTP status
         if (response.status && (response.status >= 400 && response.status < 600)) {
-            alisaLog('[ERROR]', `API HTTP Error: ${response.status}`, { text: text.substring(0, 200) });
-            debugLog(`HTTP Error ${response.status}`, { fullResponse: text.substring(0, 500) });
+            if (window.debugMode) debugLog(`HTTP Error ${response.status}`, { responseLength: text.length });
             return null;
         }
         
+        // Try to parse JSON
         try {
             const parsed = JSON.parse(text);
-            debugLog('JSON parse successful', { resultKeys: Object.keys(parsed), resultCount: parsed.results?.length });
+            if (window.debugMode) {
+                const resultCount = parsed.results?.length || parsed.data?.results?.length || 0;
+                debugLog('✓ JSON parsed', { status: response.status, contentLength: text.length, resultCount: resultCount });
+            }
             return parsed;
         } catch (e) {
-            alisaLog('[ERROR]', 'Failed to parse API JSON', { error: e.message, text: text.substring(0, 200) });
-            debugLog('JSON parse error', { error: e.message, rawResponse: text.substring(0, 300) });
+            if (window.debugMode) debugLog('JSON parse error', { error: e.message });
             return null;
         }
     }
@@ -187,22 +185,50 @@
             variants.push(normalized);
         };
 
+        // Original title
         add(rawTitle);
 
-        let cleaned = (rawTitle || '').replace(/^\s*смотреть\s+/iu, '').trim();
-        cleaned = cleaned.replace(/\s*(\d+)\s*(серия|серии|серий)\s*$/iu, '').trim();
-        cleaned = cleaned.replace(/\s*(серия|серии|серий)\s*(\d+)\s*$/iu, '').trim();
-        cleaned = cleaned.replace(/\s*episode\s*\d+\s*$/iu, '').trim();
+        // Aggressive cleaning: remove all jut.su boilerplate
+        let cleaned = (rawTitle || '')
+            .replace(/^\s*смотреть\s+/iu, '')           // Remove "Смотреть"
+            .replace(/\s+на\s+jut\.su\s*$/iu, '')       // Remove "на Jut.su"
+            .replace(/\s*\(jut\.su\)\s*$/iu, '')        // Remove "(Jut.su)"
+            .replace(/\s+(на\s+)?русском\s*$/iu, '')    // Remove language tags
+            .replace(/\s*-\s*anime\s*$/iu, '')           // Remove "-anime" suffix
+            .trim();
+
+        // Remove episode numbers and indicators
+        cleaned = cleaned
+            .replace(/\s+(\d+)\s+(серия|серии|серий|епизод|episode|episode\s*\d+)\s*$/iu, '') // "N серия"
+            .replace(/\s+(season\s+\d+\s+)?episode\s+\d+\s*$/iu, '')                         // "Season N Episode M" or "Episode N"
+            .replace(/\s+part\s+\d+\s*$/iu, '')                                             // "Part N"
+            .trim();
+
         add(cleaned);
 
+        // Try without episode number from original
         if (episode) {
-            const noEp = (rawTitle || '').replace(new RegExp(`\\s*${episode}\\s*(серия|серии|серий)?\\s*$`, 'iu'), '').trim();
+            const noEp = (rawTitle || '')
+                .replace(new RegExp(`\\b${episode}\\b\\s*(серия|серии|серий|епизод|episode)?`, 'iu'), '')
+                .replace(/^\s*смотреть\s+/iu, '')
+                .trim();
             add(noEp);
         }
 
-        const slug = (window.location.pathname.split('/').filter(Boolean)[0] || '').replace(/[-_]+/g, ' ').trim();
+        // Try URL slug from pathname
+        const slug = (window.location.pathname.split('/').filter(Boolean)[0] || '')
+            .replace(/[-_]/g, ' ')
+            .replace(/\d+/g, '')  // Remove numbers that might be IDs
+            .trim();
         add(slug);
 
+        // If original had multiple words, try first 2-3 words
+        const words = rawTitle ? rawTitle.split(/\s+/) : [];
+        if (words.length > 2) {
+            add(words.slice(0, Math.min(3, words.length)).join(' ').replace(/^смотреть\s+/iu, '').trim());
+        }
+
+        debugLog('Title variants generated', { original: rawTitle, variants: variants, count: variants.length });
         return variants.filter(Boolean);
     }
 
@@ -242,48 +268,80 @@
         return urls;
     }
 
-    function gmRequestJson(url, contextLabel) {
+    function gmRequestJson(url, contextLabel, retries = 2) {
         return new Promise((resolve) => {
             const startTime = performance.now();
-            GM_xmlhttpRequest({
-                method: 'GET',
-                url,
-                timeout: API_TIMEOUT,
-                onload: (response) => {
-                    const duration = Math.round(performance.now() - startTime);
-                    debugLog('API response received', {
-                        context: contextLabel,
-                        status: response.status,
-                        duration: `${duration}ms`,
-                        responseLength: response.responseText?.length,
-                        url: url
-                    });
+            const attempt = (attemptNum) => {
+                debugLog(`API request attempt ${attemptNum + 1}/${retries + 1}`, { url: url, context: contextLabel });
+                
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url,
+                    timeout: API_TIMEOUT,
+                    headers: {
+                        'User-Agent': navigator.userAgent,
+                        'Referer': 'https://jut.su/',
+                        'Origin': 'https://jut.su',
+                        'Accept': 'application/json'
+                    },
+                    onload: (response) => {
+                        const duration = Math.round(performance.now() - startTime);
+                        
+                        if (window.debugMode) {
+                            console.log('%c[RAW RESPONSE]', 'background: #2196F3; color: #fff; padding: 2px 6px; border-radius: 3px; font-weight: bold;');
+                            console.log(`Status: ${response.status} | Duration: ${duration}ms | Length: ${response.responseText?.length || 0}`);
+                        }
 
-                    if (window.debugMode) {
-                        console.log('%c[RAW RESPONSE]', 'background: #2196F3; color: #fff; padding: 2px 6px; border-radius: 3px; font-weight: bold;');
-                        console.log(response.responseText?.substring(0, 1000) || 'No response');
+                        const data = validateAPIResponse(response);
+                        if (data) {
+                            debugLog('✅ API response parsed successfully', {
+                                context: contextLabel,
+                                status: response.status,
+                                duration: `${duration}ms`,
+                                resultCount: data.results?.length || data.data?.results?.length || 'N/A'
+                            });
+                            resolve(data);
+                            return;
+                        }
+                        
+                        // Retry on empty response
+                        if (attemptNum < retries) {
+                            debugLog(`🔄 Retrying (${attemptNum + 1}/${retries})...`, { delay: '1000ms' });
+                            setTimeout(() => attempt(attemptNum + 1), 1000);
+                        } else {
+                            alisaLog('[ERROR]', `API failure after ${retries + 1} attempts: ${contextLabel}`);
+                            debugLog('❌ All API retries exhausted', { context: contextLabel, totalDuration: `${duration}ms` });
+                            resolve(null);
+                        }
+                    },
+                    onerror: (error) => {
+                        const duration = Math.round(performance.now() - startTime);
+                        const errorMsg = error?.error?.message || error?.message || 'Unknown network error';
+                        
+                        if (attemptNum < retries) {
+                            debugLog(`⚠️ Request error, retrying (${attemptNum + 1}/${retries})...`, { error: errorMsg, delay: '1500ms' });
+                            setTimeout(() => attempt(attemptNum + 1), 1500);
+                        } else {
+                            alisaLog('[ERROR]', `Network error after retries: ${errorMsg}`, { context: contextLabel });
+                            debugLog('❌ Network error failed all retries', { error: errorMsg, totalDuration: `${duration}ms` });
+                            resolve(null);
+                        }
+                    },
+                    ontimeout: () => {
+                        const duration = Math.round(performance.now() - startTime);
+                        if (attemptNum < retries) {
+                            debugLog(`⏱️ Timeout, retrying (${attemptNum + 1}/${retries})...`, { duration: `${duration}ms` });
+                            setTimeout(() => attempt(attemptNum + 1), 2000);
+                        } else {
+                            alisaLog('[ERROR]', `Request timeout after ${retries + 1} attempts: ${contextLabel}`);
+                            debugLog('❌ Timeout on all retry attempts', { context: contextLabel, totalDuration: `${duration}ms` });
+                            resolve(null);
+                        }
                     }
-
-                    const data = validateAPIResponse(response);
-                    if (!data) {
-                        resolve(null);
-                        return;
-                    }
-
-                    resolve(data);
-                },
-                onerror: (error) => {
-                    const duration = Math.round(performance.now() - startTime);
-                    alisaLog('[ERROR]', 'API request error', { error: error.message || 'Unknown error' });
-                    debugLog('API request error', {
-                        context: contextLabel,
-                        error: error.message,
-                        duration: `${duration}ms`,
-                        url: url
-                    });
-                    resolve(null);
-                }
-            });
+                });
+            };
+            
+            attempt(0);
         });
     }
  
@@ -728,120 +786,150 @@
     }
     
     async function fetchConsumetResults(title, episode) {
-        const baseUrl = PROVIDER_BASE_URLS.consumet;
-        const searchUrl = `${baseUrl}/anime/gogoanime/${encodeURIComponent(title)}?page=1`;
-        const searchData = await gmRequestJson(searchUrl, 'consumet.search');
-        const searchResults = searchData?.results || [];
-        if (!searchResults.length) return [];
+        try {
+            const baseUrl = PROVIDER_BASE_URLS.consumet;
+            const searchUrl = `${baseUrl}/anime/gogoanime/${encodeURIComponent(title)}?page=1`;
+            const searchData = await gmRequestJson(searchUrl, 'consumet.search');
+            const searchResults = searchData?.results || [];
+            if (!searchResults.length) return [];
 
-        const results = [];
-        const limitedResults = searchResults.slice(0, 3);
+            const results = [];
+            const limitedResults = searchResults.slice(0, 3);
 
-        for (const item of limitedResults) {
-            const infoUrl = `${baseUrl}/anime/gogoanime/info/${encodeURIComponent(item.id)}`;
-            const infoData = await gmRequestJson(infoUrl, 'consumet.info');
-            const episodeItem = pickEpisode(infoData?.episodes, episode);
-            if (!episodeItem?.id) continue;
+            for (const item of limitedResults) {
+                try {
+                    const infoUrl = `${baseUrl}/anime/gogoanime/info/${encodeURIComponent(item.id)}`;
+                    const infoData = await gmRequestJson(infoUrl, 'consumet.info');
+                    const episodeItem = pickEpisode(infoData?.episodes, episode);
+                    if (!episodeItem?.id) continue;
 
-            const watchUrl = `${baseUrl}/anime/gogoanime/watch/${encodeURIComponent(episodeItem.id)}`;
-            const watchData = await gmRequestJson(watchUrl, 'consumet.watch');
-            const sources = watchData?.sources || [];
-            if (!sources.length) continue;
+                    const watchUrl = `${baseUrl}/anime/gogoanime/watch/${encodeURIComponent(episodeItem.id)}`;
+                    const watchData = await gmRequestJson(watchUrl, 'consumet.watch');
+                    const sources = watchData?.sources || [];
+                    if (!sources.length) continue;
 
-            const urls = buildUrlMapFromSources(sources);
-            results.push({
-                id: item.id,
-                title: item.title,
-                provider: 'consumet',
-                type: 'stream',
-                link: urls.default,
-                urls: urls,
-                quality: sources[0]?.quality || 'auto'
-            });
+                    const urls = buildUrlMapFromSources(sources);
+                    results.push({
+                        id: item.id,
+                        title: item.title,
+                        provider: 'consumet',
+                        type: 'stream',
+                        link: urls.default,
+                        urls: urls,
+                        quality: sources[0]?.quality || 'auto'
+                    });
+                } catch (itemError) {
+                    if (window.debugMode) debugLog('Consumet item processing error', { title: item.title, error: itemError.message });
+                    continue;
+                }
+            }
+
+            return results;
+        } catch (err) {
+            if (window.debugMode) debugLog('Consumet provider error', { error: err.message });
+            return [];
         }
-
-        return results;
     }
 
     async function fetchHianimeResults(title, episode) {
-        const baseUrl = PROVIDER_BASE_URLS.hianime;
-        const searchUrl = `${baseUrl}/api/v2/hianime/search?q=${encodeURIComponent(title)}`;
-        const searchData = await gmRequestJson(searchUrl, 'hianime.search');
-        const searchResults = searchData?.data?.results || searchData?.results || [];
-        if (!searchResults.length) return [];
+        try {
+            const baseUrl = PROVIDER_BASE_URLS.hianime;
+            const searchUrl = `${baseUrl}/api/v2/hianime/search?q=${encodeURIComponent(title)}`;
+            const searchData = await gmRequestJson(searchUrl, 'hianime.search');
+            const searchResults = searchData?.data?.results || searchData?.results || [];
+            if (!searchResults.length) return [];
 
-        const results = [];
-        const limitedResults = searchResults.slice(0, 3);
+            const results = [];
+            const limitedResults = searchResults.slice(0, 3);
 
-        for (const item of limitedResults) {
-            const infoUrl = `${baseUrl}/api/v2/hianime/anime/${encodeURIComponent(item.id)}`;
-            const infoData = await gmRequestJson(infoUrl, 'hianime.info');
-            const episodes = infoData?.data?.episodes || infoData?.episodes || [];
-            const episodeItem = pickEpisode(episodes, episode);
-            const episodeId = episodeItem?.episodeId || episodeItem?.id;
-            if (!episodeId) continue;
+            for (const item of limitedResults) {
+                try {
+                    const infoUrl = `${baseUrl}/api/v2/hianime/anime/${encodeURIComponent(item.id)}`;
+                    const infoData = await gmRequestJson(infoUrl, 'hianime.info');
+                    const episodes = infoData?.data?.episodes || infoData?.episodes || [];
+                    const episodeItem = pickEpisode(episodes, episode);
+                    const episodeId = episodeItem?.episodeId || episodeItem?.id;
+                    if (!episodeId) continue;
 
-            const watchUrl = `${baseUrl}/api/v2/hianime/episode/sources?episodeId=${encodeURIComponent(episodeId)}`;
-            const watchData = await gmRequestJson(watchUrl, 'hianime.watch');
-            const sources = watchData?.data?.sources || watchData?.sources || [];
-            if (!sources.length) continue;
+                    const watchUrl = `${baseUrl}/api/v2/hianime/episode/sources?episodeId=${encodeURIComponent(episodeId)}`;
+                    const watchData = await gmRequestJson(watchUrl, 'hianime.watch');
+                    const sources = watchData?.data?.sources || watchData?.sources || [];
+                    if (!sources.length) continue;
 
-            const urls = buildUrlMapFromSources(sources.map((source) => ({
-                url: source.url,
-                quality: source.quality,
-                isM3U8: source.isM3U8
-            })));
+                    const urls = buildUrlMapFromSources(sources.map((source) => ({
+                        url: source.url,
+                        quality: source.quality,
+                        isM3U8: source.isM3U8
+                    })));
 
-            results.push({
-                id: item.id,
-                title: item.title || item.name,
-                provider: 'hianime',
-                type: 'stream',
-                link: urls.default,
-                urls: urls,
-                quality: sources[0]?.quality || 'auto'
-            });
+                    results.push({
+                        id: item.id,
+                        title: item.title || item.name,
+                        provider: 'hianime',
+                        type: 'stream',
+                        link: urls.default,
+                        urls: urls,
+                        quality: sources[0]?.quality || 'auto'
+                    });
+                } catch (itemError) {
+                    if (window.debugMode) debugLog('Hianime item processing error', { title: item.title, error: itemError.message });
+                    continue;
+                }
+            }
+
+            return results;
+        } catch (err) {
+            if (window.debugMode) debugLog('Hianime provider error', { error: err.message });
+            return [];
         }
-
-        return results;
     }
 
     async function fetchGogoResults(title, episode) {
-        const baseUrl = PROVIDER_BASE_URLS.gogo;
-        const searchUrl = `${baseUrl}/search?keyw=${encodeURIComponent(title)}`;
-        const searchData = await gmRequestJson(searchUrl, 'gogo.search');
-        const searchResults = searchData?.results || searchData || [];
-        if (!searchResults.length) return [];
+        try {
+            const baseUrl = PROVIDER_BASE_URLS.gogo;
+            const searchUrl = `${baseUrl}/search?keyw=${encodeURIComponent(title)}`;
+            const searchData = await gmRequestJson(searchUrl, 'gogo.search');
+            const searchResults = searchData?.results || searchData || [];
+            if (!searchResults.length) return [];
 
-        const results = [];
-        const limitedResults = searchResults.slice(0, 3);
+            const results = [];
+            const limitedResults = searchResults.slice(0, 3);
 
-        for (const item of limitedResults) {
-            const infoUrl = `${baseUrl}/anime-details/${encodeURIComponent(item.id)}`;
-            const infoData = await gmRequestJson(infoUrl, 'gogo.info');
-            const episodes = infoData?.episodes || [];
-            const episodeItem = pickEpisode(episodes, episode);
-            const episodeId = episodeItem?.episodeId || episodeItem?.id;
-            if (!episodeId) continue;
+            for (const item of limitedResults) {
+                try {
+                    const infoUrl = `${baseUrl}/anime-details/${encodeURIComponent(item.id)}`;
+                    const infoData = await gmRequestJson(infoUrl, 'gogo.info');
+                    const episodes = infoData?.episodes || [];
+                    const episodeItem = pickEpisode(episodes, episode);
+                    const episodeId = episodeItem?.episodeId || episodeItem?.id;
+                    if (!episodeId) continue;
 
-            const watchUrl = `${baseUrl}/vidcdn/watch/${encodeURIComponent(episodeId)}`;
-            const watchData = await gmRequestJson(watchUrl, 'gogo.watch');
-            const sources = watchData?.sources || [];
-            if (!sources.length) continue;
+                    const watchUrl = `${baseUrl}/vidcdn/watch/${encodeURIComponent(episodeId)}`;
+                    const watchData = await gmRequestJson(watchUrl, 'gogo.watch');
+                    const sources = watchData?.sources || [];
+                    if (!sources.length) continue;
 
-            const urls = buildUrlMapFromSources(sources);
-            results.push({
-                id: item.id,
-                title: item.title,
-                provider: 'gogo',
-                type: 'stream',
-                link: urls.default,
-                urls: urls,
-                quality: sources[0]?.quality || 'auto'
-            });
+                    const urls = buildUrlMapFromSources(sources);
+                    results.push({
+                        id: item.id,
+                        title: item.title,
+                        provider: 'gogo',
+                        type: 'stream',
+                        link: urls.default,
+                        urls: urls,
+                        quality: sources[0]?.quality || 'auto'
+                    });
+                } catch (itemError) {
+                    if (window.debugMode) debugLog('Gogo item processing error', { title: item.title, error: itemError.message });
+                    continue;
+                }
+            }
+
+            return results;
+        } catch (err) {
+            if (window.debugMode) debugLog('Gogo provider error', { error: err.message });
+            return [];
         }
-
-        return results;
     }
 
     async function fetchProviderResults(providerKey, title, episode) {
@@ -858,30 +946,54 @@
             : buildTitleVariants(titleOrTitles, episode);
 
         if (!titles.length) {
-            alisaLog('[API]', 'No title provided for source fetch');
-            debugLog('Title list is empty, skipping API fetch');
+            alisaLog('[VIDEO]', 'No title available for external sources');
+            showAlisaNotify('⚠️ Не удалось определить название для поиска источников');
             callback(null);
             return;
         }
 
         const providerOrder = getProviderOrder(settings.providerPrimary);
-        debugLog('Provider fallback order', { order: providerOrder, titles: titles });
+        
+        alisaLog('[API]', `Searching for sources (${titles.length} title variants, ${providerOrder.length} providers)`);
+        showAlisaNotify('🔍 Поиск источников... пожалуйста, подождите');
 
         (async () => {
+            let attemptCount = 0;
+            const totalAttempts = titles.length * providerOrder.length;
+            
             for (const providerKey of providerOrder) {
                 for (const title of titles) {
-                    alisaLog('[API]', `Provider ${providerKey} → ${title}`);
-                    debugLog('Trying provider + title variant', { provider: providerKey, title: title });
+                    attemptCount++;
+                    if (window.debugMode) {
+                        debugLog(`[${attemptCount}/${totalAttempts}] Trying provider`, { 
+                            provider: providerKey, 
+                            title: title.substring(0, 50) + (title.length > 50 ? '...' : '') 
+                        });
+                    }
 
                     const results = await fetchProviderResults(providerKey, title, episode);
                     if (results && results.length) {
-                        alisaLog('[API]', `Found ${results.length} result(s) via ${providerKey}`, { provider: providerKey });
+                        alisaLog('[API]', `✅ Found ${results.length} source(s) via ${providerKey}`);
+                        debugLog('Source search successful', { 
+                            provider: providerKey, 
+                            title: title,
+                            resultsCount: results.length,
+                            attempts: attemptCount
+                        });
                         callback(results, title, providerKey);
                         return;
                     }
                 }
             }
 
+            // No sources found after all attempts
+            alisaLog('[VIDEO]', 'No external sources found after exhausting all providers');
+            showAlisaNotify('ℹ️ Внешние источники не найдены, используется оригинальный плеер');
+            debugLog('Source search exhausted', { 
+                totalAttempts: totalAttempts, 
+                providers: providerOrder, 
+                titleVariants: titles.length 
+            });
             callback(null);
         })();
     }
