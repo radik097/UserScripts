@@ -317,12 +317,14 @@
             .alisa-setting-item {
                 display: flex; justify-content: space-between; align-items: center;
                 padding: 8px 0; margin: 8px 0; border-bottom: 1px solid #333;
+                cursor: pointer; user-select: none;
             }
-            .alisa-setting-label { font-size: 12px; color: #bbb; }
+            .alisa-setting-label { font-size: 12px; color: #bbb; pointer-events: none; }
             .alisa-toggle {
                 width: 36px; height: 20px; background: #444; 
                 border-radius: 10px; cursor: pointer; position: relative;
-                transition: background 0.3s; border: none; padding: 0;
+                transition: background 0.3s; border: none; padding: 4px;
+                pointer-events: auto; flex-shrink: 0;
             }
             .alisa-toggle.active { background: #4caf50; }
             .alisa-toggle::after {
@@ -1461,15 +1463,22 @@
             const item = document.createElement('div');
             item.className = 'alisa-setting-item';
             
-            const labelEl = document.createElement('label');
+            const labelEl = document.createElement('div');
             labelEl.className = 'alisa-setting-label';
             labelEl.textContent = label;
             
             const toggleBtn = document.createElement('button');
             toggleBtn.className = `alisa-toggle ${settings[key] ? 'active' : ''}`;
             toggleBtn.dataset.setting = key;
+            
+            // Обработчик на кнопку
             toggleBtn.addEventListener('click', (e) => {
-                e.preventDefault();
+                e.stopPropagation();
+                updateSetting(key, !settings[key]);
+            });
+            
+            // Обработчик на весь item для удобства
+            item.addEventListener('click', () => {
                 updateSetting(key, !settings[key]);
             });
             
