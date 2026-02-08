@@ -1,4 +1,43 @@
+
 ## Documentation Comment
+
+1. **Создай отдельный репозиторий или файл для Brain (логики)**:
+   - Перейди на GitHub в твой репозиторий (radik097/UserScripts или новый).
+   - Создай новый файл: `jutsu-brain.js` (или папку `jutsu-plus/lib/brain.js`).
+   - В этот файл перенеси всю логику: функции вроде `fetchExternalSources`, `injectDirectSources`, `fetchProviderResults` (Consumet, Hianime, Gogo), `validateAPIResponse`, `observerManager`, `gmRequestJson`, `alisaLog` и все модули (initAutoSkip, initAutoNext и т.д.).
+   - Убери из Brain всё, что связано с UI: стили, DOM-элементы (панели, кнопки, notify), события кликов. Brain должен экспортировать функции как модуль (используй `export` для ES6 или глобальные переменные).
+   - Пример структуры Brain:
+     ```javascript
+     // jutsu-brain.js
+     export const observerManager = { ... };  // вся логика observers
+     export async function fetchExternalSources(titleOrTitles, callback) { ... };
+     export function initAutoSkip() { ... };  // возвращает {disconnect}
+     // ... все остальные функции логики
+     ```
+   - Зафиксируй версию (например, 1.0) и закоммить в GitHub. Сделай raw-ссылку: `https://raw.githubusercontent.com/radik097/UserScripts/main/jutsu-plus/lib/jutsu-brain.js`.
+
+2. **Модифицируй основной UserScript (UI-часть)**:
+   - В основном файле `Jut.su-AutoSkipPlus.user.js` добавь `@require` для Brain:
+     ```javascript
+     // @require https://raw.githubusercontent.com/radik097/UserScripts/main/jutsu-plus/lib/jutsu-brain.js
+     ```
+   - Импортируй функции из Brain:
+     ```javascript
+     import { observerManager, fetchExternalSources, initAutoSkip /* и т.д. */ } from './jutsu-brain.js';  // если ES6, иначе используй глобальные
+     ```
+   - Оставь в основном скрипте только UI: стили (`injectGlobalStyles`), панели (`buildSettingsPanel`), уведомления (`showAlisaNotify`), модалки (`renderSourceModal`), кнопки (`renderSourceButtons`), меню (`registerMenu`).
+   - В основном скрипте вызывай функции Brain: например, `initAutoSkip()` из Brain, но рендеринг UI — локально.
+
+3. **Раздели логику и UI в вызовах**:
+   - В `initializeAllFeatures()`: вызывай Brain-функции для init модулей, но UI-элементы (кнопки, панели) обрабатывай в основном скрипте.
+   - Для поиска: `fetchExternalSources` из Brain, но `showSearchProgress` и `renderNoSourcesBlock` — в UI.
+   - Тестируй: Brain должен работать как standalone lib (можно тестировать отдельно в консоли браузера).
+
+4. **Обнови документацию и версии**:
+   - В README.md репозитория опиши: "Brain — ядро логики, подгружается из GitHub для лёгкого обновления".
+   - Увеличь версию UserScript до 3.8.0, добавь changelog: "Разделён на Brain (lib) и UI".
+
+Это позволит обновлять логику Brain отдельно, без переустановки всего скрипта. Тестируй на jut.su!
 
 /**
  * PROJECT CONTEXT & CODING GUIDELINES

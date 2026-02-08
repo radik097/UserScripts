@@ -1,8 +1,8 @@
-// ==UserScript==
+﻿// ==UserScript==
 // @name            Jut.su АвтоСкип+ (Ultimate Edition by description009)
 // @name:en         Jut.su Auto+ (Skip Intro, Next Episode, Preview, Download + External Sources)
 // @namespace       http://tampermonkey.net/
-// @version         3.7.3
+// @version         3.7.4
 // @description     Автоскип заставок, автопереход, предпросмотр серий, кнопка загрузки, интеграция внешних видео-ссылок, модальное окно выбора источников и панель настроек
 // @description:en  Auto-skip intros, next episode, previews, download button, external sources with source picker modal and settings panel
 // @author          Rodion (integrator), Diorhc (preview), VakiKrin (download), nab (external sources), Alisa (refactoring, logging & architecture)
@@ -616,6 +616,33 @@
             .alisa-no-sources-btn:hover { background: #45a049; }
             .alisa-no-sources-btn.secondary { background: #444; color: #fff; }
             .alisa-no-sources-btn.secondary:hover { background: #555; }
+            
+            /* Search Progress Bar */
+            .alisa-search-progress {
+                position: fixed; top: 0; left: 0; right: 0; z-index: 999999;
+                height: 4px; background: #1a1a1a; overflow: hidden;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+                transition: opacity 0.5s ease-out;
+            }
+            .alisa-search-progress-fill {
+                width: 0%; height: 100%;
+                background: linear-gradient(90deg, #4caf50, #81c784, #4caf50);
+                background-size: 200% 100%;
+                animation: alisaProgressFlow 2.5s linear infinite;
+                transition: width 0.4s ease-out;
+            }
+            .alisa-search-progress-text {
+                position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+                background: rgba(0,0,0,0.75); color: #fff; padding: 6px 14px;
+                border-radius: 6px; font-size: 13px;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.5); white-space: nowrap;
+                z-index: 9999999; pointer-events: none;
+            }
+            @keyframes alisaProgressFlow {
+                0% { background-position: 0% 50%; }
+                100% { background-position: 200% 50%; }
+            }
         `;
         document.head.appendChild(style);
         alisaLog('[UI]', 'Global styles injected');
@@ -633,6 +660,50 @@
         setTimeout(() => {
             notify.style.opacity = '0';
         }, duration);
+    }
+    
+    function showSearchProgress(totalAttempts, currentAttempt = 0, message = 'Поиск источников...') {
+        const existing = document.querySelector('.alisa-search-progress');
+        if (existing) existing.remove();
+        const existingText = document.querySelector('.alisa-search-progress-text');
+        if (existingText) existingText.remove();
+        
+        const progressBar = document.createElement('div');
+        progressBar.className = 'alisa-search-progress';
+        
+        const fill = document.createElement('div');
+        fill.className = 'alisa-search-progress-fill';
+        
+        const text = document.createElement('div');
+        text.className = 'alisa-search-progress-text';
+        
+        progressBar.appendChild(fill);
+        document.body.appendChild(progressBar);
+        document.body.appendChild(text);
+
+        const update = (attempt) => {
+            const safeTotal = Math.max(totalAttempts, 1);
+            const percent = Math.min(100, Math.round((attempt / safeTotal) * 100));
+            fill.style.width = `${percent}%`;
+            text.textContent = `${message} ${attempt}/${safeTotal} попыток (${percent}%)`;
+        };
+
+        const complete = (success, finalMessage) => {
+            fill.style.background = success ? '#4caf50' : '#f44336';
+            fill.style.animation = 'none';
+            text.textContent = finalMessage;
+            setTimeout(() => {
+                progressBar.style.opacity = '0';
+                text.style.opacity = '0';
+                setTimeout(() => {
+                    progressBar.remove();
+                    text.remove();
+                }, 500);
+            }, 1200);
+        };
+
+        update(currentAttempt);
+        return { update, complete };
     }
     
     function toggleSettingsPanel() {
@@ -990,18 +1061,20 @@
         }
 
         const providerOrder = getProviderOrder(settings.providerPrimary);
+        const totalAttempts = titles.length * providerOrder.length;
+        const progress = showSearchProgress(totalAttempts, 0, 'Поиск источников...');
         
         alisaLog('[API]', `🔍 Searching for sources (${titles.length} title variants, ${providerOrder.length} providers)`);
         showAlisaNotify('🔍 Поиск источников... пожалуйста, подождите');
 
         (async () => {
             let attemptCount = 0;
-            const totalAttempts = titles.length * providerOrder.length;
             const foundAnimeLog = [];
             
             for (const providerKey of providerOrder) {
                 for (const title of titles) {
                     attemptCount++;
+                    progress.update(attemptCount);
                     if (window.debugMode) {
                         debugLog(`[${attemptCount}/${totalAttempts}] Trying provider`, { 
                             provider: providerKey, 
@@ -1025,6 +1098,7 @@
                             attempts: attemptCount,
                             attemptPercentage: `${Math.round((attemptCount / totalAttempts) * 100)}%`
                         });
+                        progress.complete(true, 'Источники найдены! Загружаем…');
                         callback(results, title, providerKey);
                         return;
                     }
@@ -1032,6 +1106,7 @@
             }
 
             // No sources found after all attempts
+            progress.complete(false, 'Источники не найдены, используется оригинал');
             alisaLog('[VIDEO]', '❌ No external sources found after exhausting all providers');
             alisaLog('[VIDEO]', `Tried ${totalAttempts} combinations: ${providerOrder.length} providers × ${titles.length} title variants`);
             showAlisaNotify('ℹ️ Внешние источники не найдены, используется оригинальный плеер');
@@ -1085,8 +1160,8 @@
             <br>
             <div style="margin-bottom: 8px;">📝 <strong>Информация о поиске:</strong></div>
             <div>Названия опробованы: <strong>${title}</strong></div>
-            <div>Установка: Эпизод <strong>${episodeNumber || '—'}</strong>, Сезон <strong>${seasonNumber || '—'}</strong></div>
-        `.replace('${episodeNumber}', episode || '?').replace('${seasonNumber}', 'N/A');
+            <div>Установка: Эпизод <strong>${episode || '—'}</strong>, Сезон <strong>N/A</strong></div>
+        `;
         
         const buttonsDiv = document.createElement('div');
         buttonsDiv.className = 'alisa-no-sources-buttons';
