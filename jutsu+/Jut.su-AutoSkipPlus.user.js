@@ -2,7 +2,7 @@
 // @name            Jut.su АвтоСкип+ (Ultimate Edition by description009)
 // @name:en         Jut.su Auto+ (Skip Intro, Next Episode, Preview, Download + External Sources)
 // @namespace       http://tampermonkey.net/
-// @version         3.8.1
+// @version         3.8.2
 // @description     Автоскип заставок, автопереход, предпросмотр серий, кнопка загрузки, интеграция внешних видео-ссылок, модальное окно выбора источников и панель настроек
 // @description:en  Auto-skip intros, next episode, previews, download button, external sources with source picker modal and settings panel
 // @author          Rodion (integrator), Diorhc (preview), VakiKrin (download), nab (external sources), Alisa (refactoring, logging & architecture)
@@ -1543,7 +1543,7 @@
         infoBtn.textContent = 'ℹ️ О скрипте (консоль)';
         infoBtn.addEventListener('click', () => {
             console.log('%cJut.su Auto+ (Ultimate Edition)', 'background: #4caf50; color: #fff; padding: 8px; border-radius: 3px; font-weight: bold; font-size: 14px;');
-            console.log('Версия: 3.8.1');
+            console.log('Версия: 3.8.2');
             console.log('Авторы: Rodion, Diorhc, VakiKrin, nab, Alisa');
             console.log('Лицензия: MIT');
             console.log('════════════════════════════════════════');
@@ -1570,7 +1570,7 @@
             console.log('%cDEBUG: EXPORTABLE JSON', 'background: #9C27B0; color: #fff; padding: 4px; font-weight: bold;');
             console.log(JSON.stringify({
                 metadata: {
-                    version: '3.8.1',
+                    version: '3.8.2',
                     debugMode: window.debugMode,
                     timestamp: new Date().toISOString(),
                     url: window.location.href,
