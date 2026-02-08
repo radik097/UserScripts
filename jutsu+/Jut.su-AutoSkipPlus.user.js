@@ -2,7 +2,7 @@
 // @name            Jut.su АвтоСкип+ (Ultimate Edition by description009)
 // @name:en         Jut.su Auto+ (Skip Intro, Next Episode, Preview, Download + External Sources)
 // @namespace       http://tampermonkey.net/
-// @version         3.7.9
+// @version         3.8.0
 // @description     Автоскип заставок, автопереход, предпросмотр серий, кнопка загрузки, интеграция внешних видео-ссылок, модальное окно выбора источников и панель настроек
 // @description:en  Auto-skip intros, next episode, previews, download button, external sources with source picker modal and settings panel
 // @author          Rodion (integrator), Diorhc (preview), VakiKrin (download), nab (external sources), Alisa (refactoring, logging & architecture)
@@ -385,6 +385,9 @@
     const PROVIDER_HEALTH_ENDPOINTS = {
         consumet: 'https://consumet-api-yij6.onrender.com/anime/gogoanime/naruto?page=1'
     };
+    const CONSUMET_PROVIDERS = ['gogoanime', 'animekai', 'aniwatch'];
+    const CONSUMET_SERVERS = ['hd-1', 'vidstreaming', 'megacloud'];
+    const CONSUMET_CATEGORIES = ['sub', 'dub', 'raw'];
     const PROVIDER_HEALTH_TTL = 5 * 60 * 1000;
     const PROVIDER_HEALTH_TIMEOUT = 3500;
     const providerHealthCache = new Map();
@@ -910,40 +913,64 @@
     async function fetchConsumetResults(title, episode) {
         try {
             const baseUrl = PROVIDER_BASE_URLS.consumet;
-            const searchUrl = `${baseUrl}/anime/gogoanime/${encodeURIComponent(title)}?page=1`;
-            const searchData = await gmRequestJson(searchUrl, 'consumet.search');
-            const searchResults = searchData?.results || [];
-            if (!searchResults.length) return [];
-
             const results = [];
-            const limitedResults = searchResults.slice(0, 3);
 
-            for (const item of limitedResults) {
-                try {
-                    const infoUrl = `${baseUrl}/anime/gogoanime/info/${encodeURIComponent(item.id)}`;
-                    const infoData = await gmRequestJson(infoUrl, 'consumet.info');
-                    const episodeItem = pickEpisode(infoData?.episodes, episode);
-                    if (!episodeItem?.id) continue;
+            for (const provider of CONSUMET_PROVIDERS) {
+                const searchUrl = `${baseUrl}/anime/${provider}/${encodeURIComponent(title)}?page=1`;
+                const searchData = await gmRequestJson(searchUrl, `consumet.${provider}.search`);
+                const searchResults = searchData?.results || [];
+                if (!searchResults.length) continue;
 
-                    const watchUrl = `${baseUrl}/anime/gogoanime/watch/${encodeURIComponent(episodeItem.id)}`;
-                    const watchData = await gmRequestJson(watchUrl, 'consumet.watch');
-                    const sources = watchData?.sources || [];
-                    if (!sources.length) continue;
+                const limitedResults = searchResults.slice(0, 3);
 
-                    const urls = buildUrlMapFromSources(sources);
-                    results.push({
-                        id: item.id,
-                        title: item.title,
-                        provider: 'consumet',
-                        type: 'stream',
-                        link: urls.default,
-                        urls: urls,
-                        quality: sources[0]?.quality || 'auto'
-                    });
-                } catch (itemError) {
-                    if (window.debugMode) debugLog('Consumet item processing error', { title: item.title, error: itemError.message });
-                    continue;
+                for (const item of limitedResults) {
+                    try {
+                        const infoUrl = `${baseUrl}/anime/${provider}/info/${encodeURIComponent(item.id)}`;
+                        const infoData = await gmRequestJson(infoUrl, `consumet.${provider}.info`);
+                        let episodes = infoData?.episodes || [];
+                        if (!episodes.length) {
+                            const epsUrl = `${baseUrl}/anime/${provider}/episodes/${encodeURIComponent(item.id)}`;
+                            const epsData = await gmRequestJson(epsUrl, `consumet.${provider}.episodes`);
+                            episodes = epsData?.episodes || epsData || [];
+                        }
+
+                        const episodeItem = pickEpisode(episodes, episode);
+                        const episodeId = episodeItem?.id || episodeItem?.episodeId;
+                        if (!episodeId) {
+                            if (window.debugMode) debugLog('Consumet episodeId missing', { provider, title: item.title });
+                            continue;
+                        }
+
+                        let sources = [];
+                        for (const category of CONSUMET_CATEGORIES) {
+                            for (const server of CONSUMET_SERVERS) {
+                                const watchUrl = `${baseUrl}/anime/${provider}/watch/${encodeURIComponent(episodeId)}?server=${encodeURIComponent(server)}&category=${encodeURIComponent(category)}`;
+                                const watchData = await gmRequestJson(watchUrl, `consumet.${provider}.watch`);
+                                sources = watchData?.sources || [];
+                                if (sources.length) break;
+                            }
+                            if (sources.length) break;
+                        }
+
+                        if (!sources.length) continue;
+
+                        const urls = buildUrlMapFromSources(sources);
+                        results.push({
+                            id: item.id,
+                            title: item.title,
+                            provider: provider,
+                            type: 'stream',
+                            link: urls.default,
+                            urls: urls,
+                            quality: sources[0]?.quality || 'auto'
+                        });
+                    } catch (itemError) {
+                        if (window.debugMode) debugLog('Consumet item processing error', { title: item.title, error: itemError.message });
+                        continue;
+                    }
                 }
+
+                if (results.length) break;
             }
 
             return results;
@@ -1051,18 +1078,13 @@
         }
 
         alisaLog('[VIDEO]', 'External sources search is disabled (in development)');
-        showAlisaNotify('🧪 Внешние источники пока в разработке');
-        if (window.debugMode) {
-            debugLog('External source search stub', { titleVariants: titles.length });
-        }
-        callback(null);
-        return;
-
         (async () => {
             const providerOrder = getProviderOrder(settings.providerPrimary);
             showAlisaNotify('🔍 Проверка доступности источников...');
             const availableProviders = await getAvailableProviders(providerOrder);
             if (!availableProviders.length) {
+                            console.log('Версия: 3.8.0');
+                                    version: '3.8.0',
                 showAlisaNotify('⚠️ Внешние источники недоступны, используется оригинальный плеер');
                 callback(null);
                 return;
