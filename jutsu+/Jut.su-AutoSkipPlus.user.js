@@ -333,6 +333,15 @@
         updateMenuCommands();
         updateSettingsPanel();
     }
+
+    function cycleProviderPrimary() {
+        const order = PROVIDER_ORDER.slice();
+        const currentIndex = order.indexOf(settings.providerPrimary);
+        const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % order.length;
+        const nextProvider = order[nextIndex];
+        updateSetting('providerPrimary', nextProvider);
+        showAlisaNotify(`Провайдер источников: ${nextProvider}`);
+    }
     
     function registerMenu() {
         GM_registerMenuCommand(`🎬 Jut.su Auto+ — Панель настроек`, () => toggleSettingsPanel());
@@ -342,6 +351,7 @@
         GM_registerMenuCommand(`Превью: ${settings.previewEnabled ? '✅' : '❌'}`, () => updateSetting('previewEnabled', !settings.previewEnabled));
         GM_registerMenuCommand(`Загрузка: ${settings.downloadButton ? '✅' : '❌'}`, () => updateSetting('downloadButton', !settings.downloadButton));
         GM_registerMenuCommand(`Внешн. источники: ${settings.externalInject ? '✅' : '❌'}`, () => updateSetting('externalInject', !settings.externalInject));
+        GM_registerMenuCommand(`Провайдер: ${settings.providerPrimary}`, () => cycleProviderPrimary());
         const sep2 = GM_registerMenuCommand('────────────────────', () => {});
         GM_registerMenuCommand(`🔧 Debug Mode: ${settings.debugMode ? '🟢 ON' : '⚫ OFF'}`, () => updateSetting('debugMode', !settings.debugMode));
     }
@@ -457,6 +467,12 @@
                 transition: left 0.3s;
             }
             .alisa-toggle.active::after { left: 18px; }
+
+            .alisa-select {
+                width: 100%; padding: 6px 8px; background: #1a1a1a; color: #fff;
+                border: 1px solid #444; border-radius: 6px; font-size: 12px;
+                margin-top: 6px;
+            }
             
             /* Modal for Source Selection */
             .alisa-modal {
@@ -541,6 +557,11 @@
                 toggle.classList.toggle('active', value);
             }
         });
+
+        const providerSelect = panel.querySelector('[data-provider-select]');
+        if (providerSelect) {
+            providerSelect.value = settings.providerPrimary;
+        }
     }
 
  
@@ -558,7 +579,7 @@
         
         // Detect if API returns direct URLs or only iframes
         const link = animeData.link || '';
-        const hasDirectLink = link.includes('.mp4') || link.includes('.mkv');
+        const hasDirectLink = link.includes('.mp4') || link.includes('.mkv') || link.includes('.m3u8');
         const hasIframe = link.includes('http') && !hasDirectLink;
         
         const detected = hasDirectLink ? 'direct' : 'iframe';
@@ -706,6 +727,130 @@
         }
     }
     
+    async function fetchConsumetResults(title, episode) {
+        const baseUrl = PROVIDER_BASE_URLS.consumet;
+        const searchUrl = `${baseUrl}/anime/gogoanime/${encodeURIComponent(title)}?page=1`;
+        const searchData = await gmRequestJson(searchUrl, 'consumet.search');
+        const searchResults = searchData?.results || [];
+        if (!searchResults.length) return [];
+
+        const results = [];
+        const limitedResults = searchResults.slice(0, 3);
+
+        for (const item of limitedResults) {
+            const infoUrl = `${baseUrl}/anime/gogoanime/info/${encodeURIComponent(item.id)}`;
+            const infoData = await gmRequestJson(infoUrl, 'consumet.info');
+            const episodeItem = pickEpisode(infoData?.episodes, episode);
+            if (!episodeItem?.id) continue;
+
+            const watchUrl = `${baseUrl}/anime/gogoanime/watch/${encodeURIComponent(episodeItem.id)}`;
+            const watchData = await gmRequestJson(watchUrl, 'consumet.watch');
+            const sources = watchData?.sources || [];
+            if (!sources.length) continue;
+
+            const urls = buildUrlMapFromSources(sources);
+            results.push({
+                id: item.id,
+                title: item.title,
+                provider: 'consumet',
+                type: 'stream',
+                link: urls.default,
+                urls: urls,
+                quality: sources[0]?.quality || 'auto'
+            });
+        }
+
+        return results;
+    }
+
+    async function fetchHianimeResults(title, episode) {
+        const baseUrl = PROVIDER_BASE_URLS.hianime;
+        const searchUrl = `${baseUrl}/api/v2/hianime/search?q=${encodeURIComponent(title)}`;
+        const searchData = await gmRequestJson(searchUrl, 'hianime.search');
+        const searchResults = searchData?.data?.results || searchData?.results || [];
+        if (!searchResults.length) return [];
+
+        const results = [];
+        const limitedResults = searchResults.slice(0, 3);
+
+        for (const item of limitedResults) {
+            const infoUrl = `${baseUrl}/api/v2/hianime/anime/${encodeURIComponent(item.id)}`;
+            const infoData = await gmRequestJson(infoUrl, 'hianime.info');
+            const episodes = infoData?.data?.episodes || infoData?.episodes || [];
+            const episodeItem = pickEpisode(episodes, episode);
+            const episodeId = episodeItem?.episodeId || episodeItem?.id;
+            if (!episodeId) continue;
+
+            const watchUrl = `${baseUrl}/api/v2/hianime/episode/sources?episodeId=${encodeURIComponent(episodeId)}`;
+            const watchData = await gmRequestJson(watchUrl, 'hianime.watch');
+            const sources = watchData?.data?.sources || watchData?.sources || [];
+            if (!sources.length) continue;
+
+            const urls = buildUrlMapFromSources(sources.map((source) => ({
+                url: source.url,
+                quality: source.quality,
+                isM3U8: source.isM3U8
+            })));
+
+            results.push({
+                id: item.id,
+                title: item.title || item.name,
+                provider: 'hianime',
+                type: 'stream',
+                link: urls.default,
+                urls: urls,
+                quality: sources[0]?.quality || 'auto'
+            });
+        }
+
+        return results;
+    }
+
+    async function fetchGogoResults(title, episode) {
+        const baseUrl = PROVIDER_BASE_URLS.gogo;
+        const searchUrl = `${baseUrl}/search?keyw=${encodeURIComponent(title)}`;
+        const searchData = await gmRequestJson(searchUrl, 'gogo.search');
+        const searchResults = searchData?.results || searchData || [];
+        if (!searchResults.length) return [];
+
+        const results = [];
+        const limitedResults = searchResults.slice(0, 3);
+
+        for (const item of limitedResults) {
+            const infoUrl = `${baseUrl}/anime-details/${encodeURIComponent(item.id)}`;
+            const infoData = await gmRequestJson(infoUrl, 'gogo.info');
+            const episodes = infoData?.episodes || [];
+            const episodeItem = pickEpisode(episodes, episode);
+            const episodeId = episodeItem?.episodeId || episodeItem?.id;
+            if (!episodeId) continue;
+
+            const watchUrl = `${baseUrl}/vidcdn/watch/${encodeURIComponent(episodeId)}`;
+            const watchData = await gmRequestJson(watchUrl, 'gogo.watch');
+            const sources = watchData?.sources || [];
+            if (!sources.length) continue;
+
+            const urls = buildUrlMapFromSources(sources);
+            results.push({
+                id: item.id,
+                title: item.title,
+                provider: 'gogo',
+                type: 'stream',
+                link: urls.default,
+                urls: urls,
+                quality: sources[0]?.quality || 'auto'
+            });
+        }
+
+        return results;
+    }
+
+    async function fetchProviderResults(providerKey, title, episode) {
+        if (providerKey === 'consumet') return fetchConsumetResults(title, episode);
+        if (providerKey === 'hianime') return fetchHianimeResults(title, episode);
+        if (providerKey === 'gogo') return fetchGogoResults(title, episode);
+        return [];
+    }
+
     function fetchExternalSources(titleOrTitles, callback) {
         const { episode } = getEpisodeInfo();
         const titles = Array.isArray(titleOrTitles)
@@ -719,109 +864,26 @@
             return;
         }
 
-        debugLog('Title variants prepared for API search', { titles: titles });
+        const providerOrder = getProviderOrder(settings.providerPrimary);
+        debugLog('Provider fallback order', { order: providerOrder, titles: titles });
 
-        let currentIndex = 0;
-        const tryNextTitle = () => {
-            const currentTitle = titles[currentIndex];
-            alisaLog('[API]', `Fetching sources for: ${currentTitle}`);
-            debugLog('Starting API request', { 
-                url: API_URL, 
-                title: currentTitle,
-                timeout: API_TIMEOUT,
-                encodedTitle: encodeURIComponent(currentTitle),
-                attempt: currentIndex + 1,
-                totalAttempts: titles.length
-            });
+        (async () => {
+            for (const providerKey of providerOrder) {
+                for (const title of titles) {
+                    alisaLog('[API]', `Provider ${providerKey} → ${title}`);
+                    debugLog('Trying provider + title variant', { provider: providerKey, title: title });
 
-            const startTime = performance.now();
-            const timeoutId = setTimeout(() => {
-                alisaLog('[ERROR]', 'API request timeout');
-                debugLog('API request timeout', { duration: Math.round(performance.now() - startTime) + 'ms' });
-                currentIndex += 1;
-                if (currentIndex < titles.length) {
-                    tryNextTitle();
-                } else {
-                    callback(null);
-                }
-            }, API_TIMEOUT);
-
-            GM_xmlhttpRequest({
-                method: 'GET',
-                url: `${API_URL}?title=${encodeURIComponent(currentTitle)}`,
-                timeout: API_TIMEOUT,
-                onload: (response) => {
-                    clearTimeout(timeoutId);
-                    const duration = Math.round(performance.now() - startTime);
-                    debugLog('API response received', { 
-                        status: response.status, 
-                        duration: duration + 'ms',
-                        responseLength: response.responseText?.length,
-                        titleUsed: currentTitle
-                    });
-
-                    if (window.debugMode) {
-                        console.log('%c[RAW RESPONSE]', 'background: #2196F3; color: #fff; padding: 2px 6px; border-radius: 3px; font-weight: bold;');
-                        console.log(response.responseText?.substring(0, 1000) || 'No response');
-                    }
-
-                    const data = validateAPIResponse(response);
-                    if (!data) {
-                        debugLog('Response invalid for title variant', { title: currentTitle, status: response.status });
-                        currentIndex += 1;
-                        if (currentIndex < titles.length) {
-                            tryNextTitle();
-                        } else {
-                            callback(null);
-                        }
+                    const results = await fetchProviderResults(providerKey, title, episode);
+                    if (results && results.length) {
+                        alisaLog('[API]', `Found ${results.length} result(s) via ${providerKey}`, { provider: providerKey });
+                        callback(results, title, providerKey);
                         return;
                     }
-
-                    const results = data.results || [];
-                    if (results.length === 0) {
-                        alisaLog('[API]', `No sources found for: ${currentTitle}`);
-                        debugLog('Empty results for variant', { title: currentTitle });
-                        currentIndex += 1;
-                        if (currentIndex < titles.length) {
-                            tryNextTitle();
-                        } else {
-                            callback(null);
-                        }
-                        return;
-                    }
-
-                    debugLog(`Found ${results.length} source(s)`, results.map(r => ({ 
-                        id: r.id, 
-                        title: r.title,
-                        type: r.type,
-                        quality: r.quality,
-                        link: r.link?.substring(0, 50) + '...'
-                    })));
-
-                    alisaLog('[API]', `Found ${results.length} result(s)`, { results: results.map(r => ({ id: r.id, title: r.title })) });
-                    callback(results, currentTitle);
-                },
-                onerror: (error) => {
-                    clearTimeout(timeoutId);
-                    const duration = Math.round(performance.now() - startTime);
-                    alisaLog('[ERROR]', 'API request error', { error: error.message || 'Unknown error' });
-                    debugLog('API request error', { 
-                        error: error.message, 
-                        duration: duration + 'ms',
-                        errorType: error.name || 'Unknown',
-                        titleUsed: currentTitle
-                    });
-                    currentIndex += 1;
-                    if (currentIndex < titles.length) {
-                        tryNextTitle();
-                    } else {
-                        callback(null);
-                    }
                 }
-            });
-        };
+            }
 
-        tryNextTitle();
+            callback(null);
+        })();
     }
     
     function renderSourceModal(results, title, episode) {
@@ -858,7 +920,8 @@
                 
                 const infoDiv = document.createElement('div');
                 infoDiv.className = 'alisa-modal-item-info';
-                infoDiv.textContent = `Источник: ${result.type || 'anime'} • Кач: ${result.quality || 'mixed'}`;
+                const providerLabel = result.provider ? ` • ${result.provider}` : '';
+                infoDiv.textContent = `Источник: ${result.type || 'anime'}${providerLabel} • Кач: ${result.quality || 'mixed'}`;
                 
                 item.appendChild(titleDiv);
                 item.appendChild(infoDiv);
@@ -1204,7 +1267,7 @@
         
         debugLog('Episode info extracted', { episode, season, storageKey });
         
-        fetchExternalSources(title, async (results, usedTitle) => {
+        fetchExternalSources(title, async (results, usedTitle, usedProvider) => {
             if (!results || !results.length) {
                 alisaLog('[VIDEO]', 'No external sources found');
                 debugLog('No external sources found for this title', { originalTitle: title });
@@ -1222,7 +1285,8 @@
                 usesSaved: !!savedId,
                 selectedSourceId: selectedSource?.id,
                 totalResults: results.length,
-                usedTitle: usedTitle || title
+                usedTitle: usedTitle || title,
+                usedProvider: usedProvider || selectedSource?.provider
             });
             
             if (!selectedSource) {
@@ -1238,8 +1302,9 @@
                 selectedSourceLink: selectedSource.link?.substring(0, 100)
             });
             
+            const urlMap = selectedSource.urls || { default: selectedSource.link };
             const success = sourceType === 'direct'
-                ? injectDirectSources(videoElement, { default: selectedSource.link })
+                ? injectDirectSources(videoElement, urlMap)
                 : injectIframeSource(videoElement.parentElement, selectedSource.link, title);
             
             debugLog('Injection attempt result', { success: success });
@@ -1316,6 +1381,36 @@
             item.appendChild(toggleBtn);
             panel.appendChild(item);
         });
+
+        // Provider selector
+        const providerItem = document.createElement('div');
+        providerItem.className = 'alisa-setting-item';
+        providerItem.style.flexDirection = 'column';
+        providerItem.style.alignItems = 'stretch';
+
+        const providerLabel = document.createElement('label');
+        providerLabel.className = 'alisa-setting-label';
+        providerLabel.textContent = '🔌 Провайдер источников';
+
+        const providerSelect = document.createElement('select');
+        providerSelect.className = 'alisa-select';
+        providerSelect.dataset.providerSelect = 'true';
+
+        PROVIDER_ORDER.forEach((providerKey) => {
+            const option = document.createElement('option');
+            option.value = providerKey;
+            option.textContent = providerKey === 'consumet' ? 'Consumet' : providerKey === 'hianime' ? 'Hianime' : 'Gogo';
+            providerSelect.appendChild(option);
+        });
+
+        providerSelect.value = settings.providerPrimary;
+        providerSelect.addEventListener('change', (e) => {
+            updateSetting('providerPrimary', e.target.value);
+        });
+
+        providerItem.appendChild(providerLabel);
+        providerItem.appendChild(providerSelect);
+        panel.appendChild(providerItem);
         
         // Divider
         const divider = document.createElement('div');
@@ -1363,7 +1458,9 @@
                 'Preview': settings.previewEnabled,
                 'Download': settings.downloadButton,
                 'External Inject': settings.externalInject,
-                'Debug Mode': settings.debugMode
+                'Debug Mode': settings.debugMode,
+                'Provider Primary': settings.providerPrimary,
+                'Provider Order': getProviderOrder(settings.providerPrimary).join(' → ')
             });
             console.log('%cПОЛНЫЙ ЛОГ', 'background: #FF5722; color: #fff; padding: 4px; font-weight: bold;');
             console.table(window.alisaLogs);
