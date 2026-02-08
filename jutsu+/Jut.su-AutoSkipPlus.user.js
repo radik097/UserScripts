@@ -2,7 +2,7 @@
 // @name            Jut.su АвтоСкип+ (Ultimate Edition by description009)
 // @name:en         Jut.su Auto+ (Skip Intro, Next Episode, Preview, Download + External Sources)
 // @namespace       http://tampermonkey.net/
-// @version         3.7.4
+// @version         3.7.5
 // @description     Автоскип заставок, автопереход, предпросмотр серий, кнопка загрузки, интеграция внешних видео-ссылок, модальное окно выбора источников и панель настроек
 // @description:en  Auto-skip intros, next episode, previews, download button, external sources with source picker modal and settings panel
 // @author          Rodion (integrator), Diorhc (preview), VakiKrin (download), nab (external sources), Alisa (refactoring, logging & architecture)
@@ -178,6 +178,21 @@
     function buildTitleVariants(rawTitle, episode) {
         const variants = [];
         const seen = new Set();
+        const hasCyrillic = (value) => /[\u0400-\u04FF]/.test(value || '');
+        const translitMap = {
+            'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo',
+            'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
+            'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
+            'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'shch',
+            'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya'
+        };
+        const translit = (value) => (value || '')
+            .toLowerCase()
+            .split('')
+            .map((char) => translitMap[char] ?? char)
+            .join('')
+            .replace(/\s+/g, ' ')
+            .trim();
         const add = (value) => {
             const normalized = (value || '').replace(/\s+/g, ' ').trim();
             if (!normalized || seen.has(normalized)) return;
@@ -185,28 +200,35 @@
             variants.push(normalized);
         };
 
+        // Prefer URL slug first (often English/romaji)
+        const slug = (window.location.pathname.split('/').filter(Boolean)[0] || '')
+            .replace(/[-_]/g, ' ')
+            .replace(/\d+/g, '')
+            .trim();
+        add(slug);
+
         // Original title
         add(rawTitle);
 
         // Aggressive cleaning: remove all jut.su boilerplate
         let cleaned = (rawTitle || '')
-            .replace(/^\s*смотреть\s+/iu, '')           // Remove "Смотреть"
-            .replace(/\s+на\s+jut\.su\s*$/iu, '')       // Remove "на Jut.su"
-            .replace(/\s*\(jut\.su\)\s*$/iu, '')        // Remove "(Jut.su)"
-            .replace(/\s+(на\s+)?русском\s*$/iu, '')    // Remove language tags
-            .replace(/\s*-\s*anime\s*$/iu, '')           // Remove "-anime" suffix
+            .replace(/^\s*смотреть\s+/iu, '')
+            .replace(/\s+на\s+jut\.su\s*$/iu, '')
+            .replace(/\s*\(jut\.su\)\s*$/iu, '')
+            .replace(/\s+(на\s+)?русском\s*$/iu, '')
+            .replace(/\s*-\s*anime\s*$/iu, '')
+            .replace(/\s*\[.*?\]\s*/g, '')
+            .replace(/\s*\(.*?\)\s*/g, '')
             .trim();
 
-        // Remove episode numbers and indicators
         cleaned = cleaned
-            .replace(/\s+(\d+)\s+(серия|серии|серий|епизод|episode|episode\s*\d+)\s*$/iu, '') // "N серия"
-            .replace(/\s+(season\s+\d+\s+)?episode\s+\d+\s*$/iu, '')                         // "Season N Episode M" or "Episode N"
-            .replace(/\s+part\s+\d+\s*$/iu, '')                                             // "Part N"
+            .replace(/\s+(\d+)\s+(серия|серии|серий|епизод|episode|episode\s*\d+)\s*$/iu, '')
+            .replace(/\s+(season\s+\d+\s+)?episode\s+\d+\s*$/iu, '')
+            .replace(/\s+part\s+\d+\s*$/iu, '')
             .trim();
 
         add(cleaned);
 
-        // Try without episode number from original
         if (episode) {
             const noEp = (rawTitle || '')
                 .replace(new RegExp(`\\b${episode}\\b\\s*(серия|серии|серий|епизод|episode)?`, 'iu'), '')
@@ -215,21 +237,17 @@
             add(noEp);
         }
 
-        // Try URL slug from pathname
-        const slug = (window.location.pathname.split('/').filter(Boolean)[0] || '')
-            .replace(/[-_]/g, ' ')
-            .replace(/\d+/g, '')  // Remove numbers that might be IDs
-            .trim();
-        add(slug);
-
-        // If original had multiple words, try first 2-3 words
         const words = rawTitle ? rawTitle.split(/\s+/) : [];
         if (words.length > 2) {
             add(words.slice(0, Math.min(3, words.length)).join(' ').replace(/^смотреть\s+/iu, '').trim());
         }
 
-        debugLog('Title variants generated', { original: rawTitle, variants: variants, count: variants.length });
-        return variants.filter(Boolean);
+        if (hasCyrillic(cleaned)) add(translit(cleaned));
+        if (hasCyrillic(rawTitle)) add(translit(rawTitle));
+
+        const filtered = variants.filter((value) => value && !hasCyrillic(value));
+        debugLog('Title variants generated', { original: rawTitle, variants: filtered, count: filtered.length });
+        return filtered;
     }
 
     function getProviderOrder(primary) {
@@ -282,7 +300,8 @@
                         'User-Agent': navigator.userAgent,
                         'Referer': 'https://jut.su/',
                         'Origin': 'https://jut.su',
-                        'Accept': 'application/json'
+                        'Accept': 'application/json',
+                        'Accept-Language': 'en-US,en;q=0.9'
                     },
                     onload: (response) => {
                         const duration = Math.round(performance.now() - startTime);
@@ -366,7 +385,7 @@
         hianime: 'https://hianime-api.vercel.app',
         gogo: 'https://gogoanime.consumet.org'
     };
-    const PROVIDER_ORDER = ['consumet', 'hianime', 'gogo'];
+    const PROVIDER_ORDER = ['consumet', 'gogo', 'hianime'];
     
     function updateSetting(key, value) {
         settings[key] = value;
@@ -1083,23 +1102,24 @@
                     }
 
                     const results = await fetchProviderResults(providerKey, title, episode);
-                    if (results && results.length) {
+                    const validResults = (results || []).filter((item) => item?.link || item?.urls?.default);
+                    if (validResults.length) {
                         // Build detailed anime list log
-                        const animeList = results.map((r, idx) => `${idx + 1}. ${r.title || r.id} (${r.quality || 'auto'})`).join('; ');
+                        const animeList = validResults.map((r, idx) => `${idx + 1}. ${r.title || r.id} (${r.quality || 'auto'})`).join('; ');
                         
-                        alisaLog('[API]', `✅ Found ${results.length} source(s) via ${providerKey}`);
+                        alisaLog('[API]', `✅ Found ${validResults.length} source(s) via ${providerKey}`);
                         alisaLog('[API]', `📺 Anime sources: ${animeList}`);
                         
                         debugLog('🎯 Source search SUCCESSFUL', { 
                             provider: providerKey, 
                             usedTitle: title,
-                            resultsCount: results.length,
-                            animeList: results.map(r => ({ title: r.title, quality: r.quality, type: r.type })),
+                            resultsCount: validResults.length,
+                            animeList: validResults.map(r => ({ title: r.title, quality: r.quality, type: r.type })),
                             attempts: attemptCount,
                             attemptPercentage: `${Math.round((attemptCount / totalAttempts) * 100)}%`
                         });
                         progress.complete(true, 'Источники найдены! Загружаем…');
-                        callback(results, title, providerKey);
+                        callback(validResults, title, providerKey);
                         return;
                     }
                 }
@@ -1810,7 +1830,7 @@
         infoBtn.textContent = 'ℹ️ О скрипте (консоль)';
         infoBtn.addEventListener('click', () => {
             console.log('%cJut.su Auto+ (Ultimate Edition)', 'background: #4caf50; color: #fff; padding: 8px; border-radius: 3px; font-weight: bold; font-size: 14px;');
-            console.log('Версия: 3.7.2');
+            console.log('Версия: 3.7.5');
             console.log('Авторы: Rodion, Diorhc, VakiKrin, nab, Alisa');
             console.log('Лицензия: MIT');
             console.log('════════════════════════════════════════');
@@ -1837,7 +1857,7 @@
             console.log('%cDEBUG: EXPORTABLE JSON', 'background: #9C27B0; color: #fff; padding: 4px; font-weight: bold;');
             console.log(JSON.stringify({
                 metadata: {
-                    version: '3.6',
+                    version: '3.7.5',
                     debugMode: window.debugMode,
                     timestamp: new Date().toISOString(),
                     url: window.location.href,
