@@ -2,7 +2,7 @@
 // @name            Jut.su АвтоСкип+ (Ultimate Edition by description009)
 // @name:en         Jut.su Auto+ (Skip Intro, Next Episode, Preview, Download + External Sources)
 // @namespace       http://tampermonkey.net/
-// @version         3.7.1+(1)
+// @version         3.7.2
 // @description     Автоскип заставок, автопереход, предпросмотр серий, кнопка загрузки, интеграция внешних видео-ссылок, модальное окно выбора источников и панель настроек
 // @description:en  Auto-skip intros, next episode, previews, download button, external sources with source picker modal and settings panel
 // @author          Rodion (integrator), Diorhc (preview), VakiKrin (download), nab (external sources), Alisa (refactoring, logging & architecture)
@@ -12,8 +12,8 @@
 // @grant           GM_setValue
 // @grant           GM_getValue
 // @grant           GM_xmlhttpRequest
-// @downloadURL     https://raw.githubusercontent.com/radik097/UserScripts/refs/heads/main/jutsu+/Jut.su-AutoSkipPlus.user.js
-// @updateURL       https://raw.githubusercontent.com/radik097/UserScripts/refs/heads/main/jutsu+/Jut.su-AutoSkipPlus.user.js
+// @downloadURL     https://github.com/radik097/UserScripts/raw/refs/heads/main/jutsu+/Jut.su-AutoSkipPlus.user.js
+// @updateURL       https://github.com/radik097/UserScripts/raw/refs/heads/main/jutsu+/Jut.su-AutoSkipPlus.user.js
 // @connect         andb.workers.dev
 // @connect         api.consumet.org
 // @connect         hianime-api.vercel.app
@@ -1617,7 +1617,7 @@
         infoBtn.textContent = 'ℹ️ О скрипте (консоль)';
         infoBtn.addEventListener('click', () => {
             console.log('%cJut.su Auto+ (Ultimate Edition)', 'background: #4caf50; color: #fff; padding: 8px; border-radius: 3px; font-weight: bold; font-size: 14px;');
-            console.log('Версия: 3.7.1+(1)');
+            console.log('Версия: 3.7.2');
             console.log('Авторы: Rodion, Diorhc, VakiKrin, nab, Alisa');
             console.log('Лицензия: MIT');
             console.log('════════════════════════════════════════');
