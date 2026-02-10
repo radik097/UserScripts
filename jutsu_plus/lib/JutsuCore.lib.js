@@ -248,6 +248,13 @@
 		return new Promise((resolve) => {
 			const startTime = performance.now();
 
+			if (debugMode) {
+				debug(`🔄 Server request: ${method} ${url.replace(/^https?:\/\//, '')}`, {
+					context: contextLabel,
+					dataSize: data ? JSON.stringify(data).length : 0
+				});
+			}
+
 			GM_xmlhttpRequest({
 				method: method,
 				url: url,
@@ -262,10 +269,11 @@
 					const parsed = validateAPIResponse(response);
 					if (parsed) {
 						if (debugMode) {
-							debug('Server response parsed', {
+							debug('✅ Server response parsed', {
 								context: contextLabel,
 								status: response.status,
-								duration: `${duration}ms`
+								duration: `${duration}ms`,
+								responseSize: response.responseText?.length || 0
 							});
 						}
 						resolve({ ok: true, data: parsed });
@@ -273,20 +281,32 @@
 					}
 
 					if (debugMode) {
-						debug('Server response invalid', {
+						debug('❌ Server response invalid', {
 							context: contextLabel,
 							status: response.status,
-							duration: `${duration}ms`
+							duration: `${duration}ms`,
+							responseStart: response.responseText?.substring(0, 100)
 						});
 					}
-					resolve({ ok: false, error: `Invalid response (${response.status})` });
+					resolve({ ok: false, error: `Invalid response (${response.status})`, status: response.status });
 				},
 				onerror: (error) => {
+					const duration = Math.round(performance.now() - startTime);
 					const errorMsg = error?.error?.message || error?.message || 'Unknown network error';
-					resolve({ ok: false, error: errorMsg });
+					debug('❌ Network error', {
+						context: contextLabel,
+						error: errorMsg,
+						duration: `${duration}ms`
+					});
+					resolve({ ok: false, error: errorMsg, network: true });
 				},
 				ontimeout: () => {
-					resolve({ ok: false, error: 'Request timeout' });
+					const duration = Math.round(performance.now() - startTime);
+					debug('⏱️ Request timeout', {
+						context: contextLabel,
+						duration: `${duration}ms`
+					});
+					resolve({ ok: false, error: 'Request timeout', timeout: true });
 				}
 			});
 		});
@@ -294,18 +314,46 @@
 
 	async function requestServerWithFallback(path, options) {
 		const primaryUrl = `${currentServer}${path}`;
+		
+		if (debugMode) {
+			debug(`📡 Trying primary server: ${SERVER_CONFIG.primary}`, {
+				path: path.substring(0, 50)
+			});
+		}
+		
 		let response = await gmRequestServerJson(primaryUrl, options);
 
 		if (response.ok) {
+			if (debugMode) {
+				debug('✅ Primary server succeeded');
+			}
 			return response;
 		}
 
 		if (currentServer === SERVER_CONFIG.primary && SERVER_CONFIG.fallback) {
 			currentServer = SERVER_CONFIG.fallback;
 			const fallbackUrl = `${currentServer}${path}`;
+			
+			if (debugMode) {
+				debug(`📡 Trying fallback server: ${SERVER_CONFIG.fallback}`, {
+					reason: response?.error,
+					path: path.substring(0, 50)
+				});
+			}
+			
 			response = await gmRequestServerJson(fallbackUrl, options);
 			if (response.ok) {
+				if (debugMode) {
+					debug('✅ Fallback server succeeded');
+				}
 				return response;
+			}
+			
+			if (debugMode) {
+				debug('❌ Both primary and fallback servers failed', {
+					primaryError: response?.error,
+					fallbackError: response?.error
+				});
 			}
 		}
 
@@ -313,25 +361,61 @@
 	}
 
 	async function contributeAnime(payload) {
-		return requestServerWithFallback('/contribute', {
+		if (debugMode) {
+			debug('🎬 Contribute anime: preparing to send donor link', {
+				anime: payload?.animeId,
+				episode: payload?.episode,
+				quality: payload?.quality,
+				urlLength: payload?.url?.length || 0
+			});
+		}
+		
+		const result = await requestServerWithFallback('/contribute', {
 			method: 'POST',
 			data: payload,
 			contextLabel: 'server.contribute'
 		});
+		
+		if (debugMode) {
+			debug('🎬 Contribute anime: response received', {
+				ok: result?.ok,
+				error: result?.error,
+				hasData: !!result?.data
+			});
+		}
+		
+		return result;
 	}
 
 	async function getDonorLinks(payload) {
+		if (debugMode) {
+			debug('📥 Get donor links: requesting from server', {
+				anime: payload?.animeId,
+				episode: payload?.episode
+			});
+		}
+		
 		const query = new URLSearchParams({
 			anime: payload?.animeId || '',
 			ep: payload?.episode || ''
 		}).toString();
 		const path = `/links?${query}`;
 
-		return requestServerWithFallback(path, {
+		const result = await requestServerWithFallback(path, {
 			method: 'GET',
 			data: null,
 			contextLabel: 'server.links'
 		});
+		
+		if (debugMode) {
+			debug('📥 Get donor links: response received', {
+				ok: result?.ok,
+				error: result?.error,
+				linksCount: result?.data?.data?.links?.length || 0
+			});
+		}
+		
+		return result;
 	}
  
 	function getEpisodeInfo() {

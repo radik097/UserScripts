@@ -242,51 +242,119 @@
     }
 
     async function sendDonorLink(payload) {
-        if (!serverConnectionEnabled) return false;
+        if (!serverConnectionEnabled) {
+            if (window.debugMode) {
+                debugLog('Donor send skipped: server connection disabled');
+            }
+            return false;
+        }
 
         if (!isExtensionAvailable() && Core.contributeAnime) {
+            if (window.debugMode) {
+                debugLog('Sending donor link via Core.contributeAnime', {
+                    animeId: payload?.animeId,
+                    episode: payload?.episode,
+                    url: payload?.url?.substring(0, 80) + '...',
+                    quality: payload?.quality
+                });
+            }
+            
             const response = await Core.contributeAnime(payload);
+            
+            if (window.debugMode) {
+                debugLog('Core.contributeAnime response', {
+                    ok: response?.ok,
+                    error: response?.error,
+                    data: response?.data ? '(response data received)' : 'null'
+                });
+            }
+            
             if (response?.ok) {
                 alisaLog('[VIDEO]', 'Donor link sent to server');
                 dispatchServerStatus('donor');
                 return true;
             }
 
-            if (window.debugMode) {
-                debugLog('Donor link send failed', { error: response?.error });
-            }
+            debugLog('❌ Donor link send failed (Core API)', { 
+                error: response?.error,
+                status: response?.status,
+                response: JSON.stringify(response).substring(0, 200)
+            });
             return false;
         }
 
+        if (window.debugMode) {
+            debugLog('Sending donor link via extension bridge (CONTRIBUTE_ANIME)', {
+                animeId: payload?.animeId,
+                episode: payload?.episode
+            });
+        }
+
         const response = await callExtension('CONTRIBUTE_ANIME', payload);
+        
+        if (window.debugMode) {
+            debugLog('Extension response', {
+                success: response?.success,
+                error: response?.error
+            });
+        }
+
         if (response?.success) {
             alisaLog('[VIDEO]', 'Donor link sent to server');
             dispatchServerStatus('donor');
             return true;
         }
 
-        if (window.debugMode) {
-            debugLog('Donor link send failed', { error: response?.error });
-        }
+        debugLog('❌ Donor link send failed (Extension)', { 
+            error: response?.error,
+            response: JSON.stringify(response).substring(0, 200)
+        });
         return false;
     }
 
     async function maybeSendDonorLink() {
-        if (!serverConnectionEnabled) return;
+        if (!serverConnectionEnabled) {
+            if (window.debugMode) debugLog('maybeSendDonorLink: server connection disabled');
+            return;
+        }
 
         const info = getEpisodeInfo();
         const animeId = getAnimeIdFromPath();
-        if (!info?.episode || !animeId) return;
+        
+        if (!info?.episode || !animeId) {
+            if (window.debugMode) {
+                debugLog('maybeSendDonorLink: missing episode or animeId', {
+                    animeId: animeId,
+                    episode: info?.episode
+                });
+            }
+            return;
+        }
 
         const currentKey = `${animeId}:${info.episode}`;
-        if (donorSentKey === currentKey) return;
+        if (donorSentKey === currentKey) {
+            if (window.debugMode) debugLog('maybeSendDonorLink: already sent for this episode');
+            return;
+        }
 
         const video = document.querySelector('video#my-player_html5_api, video');
-        if (!video) return;
+        if (!video) {
+            if (window.debugMode) debugLog('maybeSendDonorLink: video element not found');
+            return;
+        }
 
         const source = video.querySelector('source[src]');
         const url = source?.src || video.currentSrc || video.src;
-        if (!isShareableUrl(url)) return;
+        
+        if (!isShareableUrl(url)) {
+            if (window.debugMode) {
+                debugLog('maybeSendDonorLink: non-shareable URL', {
+                    url: url?.substring(0, 100),
+                    isShareable: isShareableUrl(url)
+                });
+            }
+            return;
+        }
 
         const quality = source?.getAttribute('label') || source?.getAttribute('res') || 'auto';
         const cookies = await getJutsuCookies();
@@ -299,6 +367,14 @@
             pageUrl: window.location.href,
             cookies: cookies
         };
+
+        if (window.debugMode) {
+            debugLog('🎬 Attempting to send donor link', {
+                key: currentKey,
+                quality: quality,
+                hasCookies: !!Object.keys(cookies || {}).length
+            });
+        }
 
         const sent = await sendDonorLink(payload);
         if (sent) {
