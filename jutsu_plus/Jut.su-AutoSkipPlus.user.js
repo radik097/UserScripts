@@ -12,7 +12,7 @@
 // @grant           GM_setValue
 // @grant           GM_getValue
 // @grant           GM_xmlhttpRequest
-// @require         https://update.greasyfork.org/scripts/565619/Jutsu Auto Plus Core Library.user.js
+// @require         https://update.greasyfork.org/scripts/565619/1751507/Jutsu%20Auto%2B%20Core%20Library.js
 // @downloadURL     https://github.com/radik097/UserScripts/raw/refs/heads/main/jutsu_plus/Jut.su-AutoSkipPlus.user.js
 // @updateURL       https://github.com/radik097/UserScripts/raw/refs/heads/main/jutsu_plus/Jut.su-AutoSkipPlus.user.js
 // @connect         andb.workers.dev

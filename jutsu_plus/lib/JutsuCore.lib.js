@@ -6,8 +6,8 @@
 // @description     Ядро логики для Jut.su Auto Plus (API, обсерверы, парсинг названий)
 // @description:en  Core logic for Jut.su Auto Plus (API, observers, title parsing)
 // @author          Rodion
-// @downloadURL     https://raw.githubusercontent.com/radik097/UserScripts/main/jutsu%2B/lib/JutsuCore.lib.js
-// @updateURL       https://raw.githubusercontent.com/radik097/UserScripts/main/jutsu%2B/lib/JutsuCore.lib.js
+// @downloadURL     https://raw.githubusercontent.com/radik097/UserScripts/main/jutsu_plus/lib/JutsuCore.lib.js
+// @updateURL       https://raw.githubusercontent.com/radik097/UserScripts/main/jutsu_plus/lib/JutsuCore.lib.js
 // @match           https://jut.su/*
 // @grant           GM_xmlhttpRequest
 // @license         MIT
