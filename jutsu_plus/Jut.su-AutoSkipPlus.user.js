@@ -2,7 +2,7 @@
 // @name            Jut.su АвтоСкип Плюс (Ultimate Edition by description009)
 // @name:en         Jut.su Auto Plus (Skip Intro, Next Episode, Preview, Download + External Sources)
 // @namespace       http://tampermonkey.net/
-// @version         4.0.2
+// @version         4.0.1
 // @description     Автоскип заставок, автопереход, предпросмотр серий, кнопка загрузки, интеграция внешних видео-ссылок, донор/рецепиент система обмена ссылками, модальное окно выбора источников и панель настроек (полностью автономный, БЕЗ расширения)
 // @description:en  Auto-skip intros, next episode, previews, download button, external sources, donor/recipient link sharing system, source picker modal and settings panel (fully standalone, NO extension required)
 // @author          Rodion (integrator), Diorhc (preview), VakiKrin (download), nab (external sources), Alisa (refactoring, logging & architecture)
@@ -12,7 +12,7 @@
 // @grant           GM_setValue
 // @grant           GM_getValue
 // @grant           GM_xmlhttpRequest
-// @require https://update.greasyfork.org/scripts/565619/1752087/Jutsu%20Auto%2B%20Core%20Library.js
+// @require         https://update.greasyfork.org/scripts/565619/1752087/Jutsu%20Auto%2B%20Core%20Library.js
 // @downloadURL     https://github.com/radik097/UserScripts/raw/refs/heads/main/jutsu_plus/Jut.su-AutoSkipPlus.user.js
 // @updateURL       https://github.com/radik097/UserScripts/raw/refs/heads/main/jutsu_plus/Jut.su-AutoSkipPlus.user.js
 // @connect         andb.workers.dev
