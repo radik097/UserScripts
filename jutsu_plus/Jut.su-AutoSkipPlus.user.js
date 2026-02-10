@@ -2,9 +2,9 @@
 // @name            Jut.su АвтоСкип Плюс (Ultimate Edition by description009)
 // @name:en         Jut.su Auto Plus (Skip Intro, Next Episode, Preview, Download + External Sources)
 // @namespace       http://tampermonkey.net/
-// @version         3.8.7
-// @description     Автоскип заставок, автопереход, предпросмотр серий, кнопка загрузки, интеграция внешних видео-ссылок, модальное окно выбора источников и панель настроек
-// @description:en  Auto-skip intros, next episode, previews, download button, external sources with source picker modal and settings panel
+// @version         4.0.0
+// @description     Автоскип заставок, автопереход, предпросмотр серий, кнопка загрузки, интеграция внешних видео-ссылок, донор/рецепиент система обмена ссылками, модальное окно выбора источников и панель настроек (полностью автономный, БЕЗ расширения)
+// @description:en  Auto-skip intros, next episode, previews, download button, external sources, donor/recipient link sharing system, source picker modal and settings panel (fully standalone, NO extension required)
 // @author          Rodion (integrator), Diorhc (preview), VakiKrin (download), nab (external sources), Alisa (refactoring, logging & architecture)
 // @match           https://jut.su/*
 // @license         MIT
@@ -122,7 +122,6 @@
     let serverConnectionEnabled = false;
     let donorObserver = null;
     let donorSentKey = null;
-    let settingsListenerAttached = false;
 
     function dispatchServerStatus(role) {
         window.dispatchEvent(new CustomEvent('jutsu-server-status', {
@@ -130,42 +129,7 @@
         }));
     }
 
-    function callExtension(action, data) {
-        if (!isExtensionAvailable()) {
-            return Promise.resolve({ success: false, error: 'Extension not available' });
-        }
-        return new Promise((resolve) => {
-            const requestId = `req_${Date.now()}_${Math.random()}`;
-
-            const handler = (event) => {
-                if (event.source !== window) return;
-                if (!event.data || event.data.type !== 'BACKGROUND_RESPONSE') return;
-                if (event.data.requestId !== requestId) return;
-
-                window.removeEventListener('message', handler);
-                resolve(event.data);
-            };
-
-            window.addEventListener('message', handler);
-            window.postMessage({
-                type: 'BACKGROUND_REQUEST',
-                action: action,
-                requestId: requestId,
-                data: data
-            }, '*');
-
-            setTimeout(() => {
-                window.removeEventListener('message', handler);
-                resolve({ success: false, error: 'Timeout waiting for background response' });
-            }, 8000);
-        });
-    }
-
-    function isExtensionAvailable() {
-        return typeof window.SettingsStorage !== 'undefined';
-    }
-
-    function getCookieMap(names) {
+    function getJutsuCookies() {
         const jar = {};
         if (!document.cookie) return jar;
         const pairs = document.cookie.split(';').map((item) => item.trim());
@@ -178,7 +142,8 @@
             return acc;
         }, {});
 
-        (names || []).forEach((name) => {
+        const cookieNames = ['dle_user_id', 'dle_password', 'PHPSESSID'];
+        cookieNames.forEach((name) => {
             if (cookieMap[name]) {
                 jar[name] = cookieMap[name];
             }
@@ -197,42 +162,6 @@
         }
     }
 
-    async function syncExtensionSettings() {
-        if (!isExtensionAvailable() || !window.SettingsStorage.getSettings) {
-            updateServerConnectionEnabled(GM_getValue('enableServerConnection', true));
-            return;
-        }
-
-        const extSettings = await window.SettingsStorage.getSettings();
-        updateServerConnectionEnabled(extSettings.enableServerConnection);
-
-        if (!settingsListenerAttached && window.SettingsStorage.onSettingsChanged) {
-            settingsListenerAttached = true;
-            window.SettingsStorage.onSettingsChanged((changes) => {
-                if ('enableServerConnection' in changes) {
-                    updateServerConnectionEnabled(changes.enableServerConnection);
-                }
-            });
-        }
-    }
-
-    async function getJutsuCookies() {
-        if (!isExtensionAvailable()) {
-            return getCookieMap(['dle_user_id', 'dle_password', 'PHPSESSID']);
-        }
-
-        const response = await callExtension('GET_COOKIES', {
-            url: window.location.href,
-            names: ['dle_user_id', 'dle_password', 'PHPSESSID']
-        });
-
-        if (response?.success) {
-            return response.data || {};
-        }
-
-        return {};
-    }
-
     function isShareableUrl(url) {
         return typeof url === 'string' && url.startsWith('https://') && !url.startsWith('blob:');
     }
@@ -249,64 +178,39 @@
             return false;
         }
 
-        if (!isExtensionAvailable() && Core.contributeAnime) {
-            if (window.debugMode) {
-                debugLog('Sending donor link via Core.contributeAnime', {
-                    animeId: payload?.animeId,
-                    episode: payload?.episode,
-                    url: payload?.url?.substring(0, 80) + '...',
-                    quality: payload?.quality
-                });
-            }
-            
-            const response = await Core.contributeAnime(payload);
-            
-            if (window.debugMode) {
-                debugLog('Core.contributeAnime response', {
-                    ok: response?.ok,
-                    error: response?.error,
-                    data: response?.data ? '(response data received)' : 'null'
-                });
-            }
-            
-            if (response?.ok) {
-                alisaLog('[VIDEO]', 'Donor link sent to server');
-                dispatchServerStatus('donor');
-                return true;
-            }
-
-            debugLog('❌ Donor link send failed (Core API)', { 
-                error: response?.error,
-                status: response?.status,
-                response: JSON.stringify(response).substring(0, 200)
-            });
+        if (!Core.contributeAnime) {
+            debugLog('❌ Core.contributeAnime not available');
             return false;
         }
 
         if (window.debugMode) {
-            debugLog('Sending donor link via extension bridge (CONTRIBUTE_ANIME)', {
+            debugLog('Sending donor link via Core.contributeAnime', {
                 animeId: payload?.animeId,
-                episode: payload?.episode
+                episode: payload?.episode,
+                url: payload?.url?.substring(0, 80) + '...',
+                quality: payload?.quality
             });
         }
-
-        const response = await callExtension('CONTRIBUTE_ANIME', payload);
+        
+        const response = await Core.contributeAnime(payload);
         
         if (window.debugMode) {
-            debugLog('Extension response', {
-                success: response?.success,
-                error: response?.error
+            debugLog('Core.contributeAnime response', {
+                ok: response?.ok,
+                error: response?.error,
+                data: response?.data ? '(response data received)' : 'null'
             });
         }
-
-        if (response?.success) {
+        
+        if (response?.ok) {
             alisaLog('[VIDEO]', 'Donor link sent to server');
             dispatchServerStatus('donor');
             return true;
         }
 
-        debugLog('❌ Donor link send failed (Extension)', { 
+        debugLog('❌ Donor link send failed', { 
             error: response?.error,
+            status: response?.status,
             response: JSON.stringify(response).substring(0, 200)
         });
         return false;
@@ -430,8 +334,12 @@
         const animeId = getAnimeIdFromPath();
         if (!info?.episode || !animeId) return [];
 
+        if (!Core.getDonorLinks) {
+            debugLog('❌ Core.getDonorLinks not available');
+            return [];
+        }
+
         const cookies = await getJutsuCookies();
-        let response = null;
         const payload = {
             animeId: animeId,
             episode: info.episode,
@@ -439,13 +347,9 @@
             cookies: cookies
         };
 
-        if (!isExtensionAvailable() && Core.getDonorLinks) {
-            response = await Core.getDonorLinks(payload);
-        } else {
-            response = await callExtension('GET_DONOR_LINKS', payload);
-        }
+        const response = await Core.getDonorLinks(payload);
 
-        if ((response?.success === false) || (response?.ok === false)) {
+        if (response?.ok === false) {
             if (window.debugMode) {
                 debugLog('Donor links request failed', { error: response?.error });
             }
@@ -1666,11 +1570,7 @@
     }
 
     function initDonorLogic() {
-        if (!isExtensionAvailable()) {
-            return { disconnect: () => {} };
-        }
-
-        syncExtensionSettings();
+        updateServerConnectionEnabled(settings.enableServerConnection);
         return { disconnect: () => stopDonorObserver() };
     }
     
