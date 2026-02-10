@@ -1,0 +1,57 @@
+{
+  "name": "seek-userscripts",
+  "version": "1.0.0",
+  "description": "Userscripts for seek.com.au job search enhancements",
+  "private": true,
+  "keywords": [
+    "userscript",
+    "tampermonkey",
+    "violentmonkey",
+    "greasemonkey",
+    "seek",
+    "job-search"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/seek-userscripts.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/seek-userscripts/issues"
+  },
+  "homepage": "https://github.com/yourusername/seek-userscripts#readme",
+  "author": "Your Name",
+  "license": "MIT",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint *.user.js",
+    "lint:fix": "eslint *.user.js --fix",
+    "format": "prettier --write *.user.js *.md",
+    "format:check": "prettier --check *.user.js *.md",
+    "validate": "npm run lint && npm run format:check && npm test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "eslint": "^8.55.0",
+    "eslint-plugin-security": "^1.7.1",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "prettier": "^3.1.1"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "testMatch": [
+      "**/__tests__/**/*.test.js"
+    ],
+    "collectCoverageFrom": [
+      "*.user.js"
+    ]
+  },
+  "prettier": {
+    "singleQuote": true,
+    "trailingComma": "es5",
+    "tabWidth": 2,
+    "semi": true
+  }
+}

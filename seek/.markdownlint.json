@@ -1,0 +1,23 @@
+# Markdownlint Configuration
+
+# MD013 - Line length
+# Disabled because code blocks and URLs often exceed 80 characters
+MD013: false
+
+# MD033 - Inline HTML
+# Allow inline HTML for badges, images, and special formatting
+MD033: false
+
+# MD041 - First line in file should be a top level header
+# Allow for YAML front matter or comments at the top
+MD041: false
+
+# MD024 - Multiple headers with the same content
+# Allow duplicate headers in different sections
+MD024:
+  siblings_only: true
+
+# MD026 - Trailing punctuation in header
+# Allow question marks in headers
+MD026:
+  punctuation: ".,;:!"

@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name            Jut.su Auto+ Core Library
-// @name:en         Jut.su Auto+ Core Library
+// @name            Jut.su Auto Plus Core Library
+// @name:en         Jut.su Auto Plus Core Library
 // @namespace       http://tampermonkey.net/
 // @version         1.0.4
-// @description     Ядро логики для Jut.su Auto+ (API, обсерверы, парсинг названий)
-// @description:en  Core logic for Jut.su Auto+ (API, observers, title parsing)
+// @description     Ядро логики для Jut.su Auto Plus (API, обсерверы, парсинг названий)
+// @description:en  Core logic for Jut.su Auto Plus (API, observers, title parsing)
 // @author          Rodion
 // @downloadURL     https://raw.githubusercontent.com/radik097/UserScripts/main/jutsu%2B/lib/JutsuCore.lib.js
 // @updateURL       https://raw.githubusercontent.com/radik097/UserScripts/main/jutsu%2B/lib/JutsuCore.lib.js
@@ -17,7 +17,7 @@
 	'use strict';
 	
 	// ========================================================================
-	// JUT.SU AUTO+ CORE LIBRARY (Logic & API)
+	// JUT.SU AUTO PLUS CORE LIBRARY (Logic & API)
 	// ========================================================================
 	
 	window.JutsuCore = (function() {
