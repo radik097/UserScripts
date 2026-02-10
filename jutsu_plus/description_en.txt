@@ -34,7 +34,7 @@ Powerful Tampermonkey userscript for [Jut.su](https://jut.su) with full viewing 
 ### 🛠 Installation
 
 1. Install the [Tampermonkey extension](https://www.tampermonkey.net/)
-2. Go to [script page on GitHub](https://github.com/radik097/UserScripts/raw/refs/heads/main/jutsu+/Jut.su-AutoSkipPlus.user.js)
+2. Go to [script page on GitHub](https://github.com/radik097/UserScripts/raw/refs/heads/main/jutsu_plus/Jut.su-AutoSkipPlus.user.js)
 3. Tampermonkey will prompt installation — click "Install"
 4. Visit [Jut.su](https://jut.su) — the script activates automatically
 5. Open settings panel (⚙️ in top right corner) for configuration
