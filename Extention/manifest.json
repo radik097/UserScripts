@@ -1,0 +1,78 @@
+{
+"update_url": "https://clients2.google.com/service/update2/crx",
+
+  "manifest_version": 3,
+  "name": "Jut.su Extended",
+  "version": "1.0.4",
+  "description": "Не официальное расширение Jut.su",
+  "permissions": [
+    "storage",
+    "cookies",
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess",
+    "webRequest",
+    "webNavigation",
+    "tabs"
+  ],
+  "host_permissions": [
+    "*://jut.su/*",
+    "*://*.yandexwebcache.org/*",
+    "https://jutsu.fun/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://jut.su/*"],
+      "js": ["src/bridge.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    },
+    {
+      "matches": ["https://jut.su/*"],
+      "css": ["libs/cropper.min.css"],
+      "js": [
+        "libs/cropper.min.js",
+        "src/config.js",
+        "src/utils.js",
+        "src/settingsConfig.js",
+        "src/storage.js",
+        "src/navigationConfig.js",
+        "src/navigationRestorer.js",
+        "src/chatWidget.js",
+        "src/profileEditor.js",
+        "src/achievementsParser.js",
+        "src/achievementCard.js",
+        "src/achievementsRenderer.js",
+        "src/uiComponents.js",
+        "src/panelManager.js",
+        "src/domManager.js",
+        "src/themeSync.js",
+        "src/videoSpeedSlider.js",
+        "src/priorityNavItem.js",
+        "src/teamPageExtension.js",
+        "src/jutsuExtendedPage.js",
+        "src/userAnimePage.js",
+        "src/videoTracker.js",
+        "src/main.js"
+      ],
+      "run_at": "document_end",
+      "world": "MAIN"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "Jut.su Extended - Настройки"
+  }
+}

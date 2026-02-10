@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jut.su Extended - Настройки</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #f8f9fa;
+            --bg-secondary: #ffffff;
+            --bg-hover: #f7fafc;
+            --text-primary: #2d3748;
+            --text-secondary: #718096;
+            --text-tertiary: #a0aec0;
+            --border-color: #e2e8f0;
+            --border-hover: #cbd5e0;
+            --shadow-sm: rgba(0, 0, 0, 0.05);
+            --shadow-md: rgba(0, 0, 0, 0.1);
+            --shadow-lg: rgba(0, 0, 0, 0.15);
+            --accent-color: #667eea;
+        }
+
+        body.dark-theme {
+            --bg-primary: #1a1a1a;
+            --bg-secondary: #2d2d2d;
+            --bg-hover: #3d3d3d;
+            --text-primary: #cdcdd3;
+            --text-secondary: #9a9aa0;
+            --text-tertiary: #707070;
+            --border-color: #3d3d3d;
+            --border-hover: #4d4d4d;
+            --shadow-sm: rgba(0, 0, 0, 0.3);
+            --shadow-md: rgba(0, 0, 0, 0.4);
+            --shadow-lg: rgba(0, 0, 0, 0.5);
+            --accent-color: #bddc62;
+        }
+
+        body {
+            width: 350px;
+            font-family: verdana, sans-serif;
+            background: var(--bg-primary);
+            transition: background 0.3s ease, color 0.3s ease;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            position: relative;
+        }
+
+        .header h1 {
+            font-size: 18px;
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
+
+        .header p {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .theme-toggle {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            transition: all 0.2s ease;
+        }
+
+        .theme-toggle:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: rotate(20deg);
+        }
+
+        .settings {
+            padding: 15px;
+        }
+
+        .setting-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 15px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            margin-bottom: 10px;
+            box-shadow: 0 2px 4px var(--shadow-sm);
+            transition: all 0.2s ease;
+        }
+
+        .setting-item:hover {
+            box-shadow: 0 4px 8px var(--shadow-md);
+            transform: translateY(-1px);
+        }
+
+        .setting-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .setting-info {
+            flex: 1;
+            margin-right: 15px;
+        }
+
+        .setting-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 3px;
+            transition: color 0.3s ease;
+        }
+
+        .setting-description {
+            font-size: 11px;
+            color: var(--text-secondary);
+            line-height: 1.4;
+            transition: color 0.3s ease;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 48px;
+            height: 24px;
+            flex-shrink: 0;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: var(--border-hover);
+            transition: .3s;
+            border-radius: 24px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(24px);
+        }
+
+        .footer {
+            padding: 15px;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            gap: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: verdana, sans-serif;
+        }
+
+        .btn-reset {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border: 2px solid var(--border-color);
+        }
+
+        .btn-reset:hover {
+            background: var(--bg-hover);
+            border-color: var(--border-hover);
+        }
+
+        .btn-close {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-close:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
+        .status-message {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            box-shadow: 0 4px 12px var(--shadow-lg);
+            display: none;
+            align-items: center;
+            gap: 8px;
+            z-index: 1000;
+            animation: slideUp 0.3s ease;
+            font-size: 11px;
+            border: 1px solid var(--border-color);
+        }
+
+        @keyframes slideUp {
+            from {
+                bottom: -50px;
+                opacity: 0;
+            }
+            to {
+                bottom: 20px;
+                opacity: 1;
+            }
+        }
+
+        .status-message.show {
+            display: flex;
+        }
+
+        .status-message.success {
+            border-left: 3px solid #48bb78;
+        }
+
+        .status-message.error {
+            border-left: 3px solid #f56565;
+        }
+
+        .status-icon {
+            font-size: 16px;
+        }
+
+        .status-text {
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .section-title {
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--accent-color);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+            padding-left: 3px;
+        }
+
+        .version {
+            text-align: center;
+            padding: 10px;
+            font-size: 10px;
+            color: var(--text-tertiary);
+            transition: color 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .setting-item {
+            animation: fadeIn 0.3s ease forwards;
+            opacity: 0;
+        }
+
+        .setting-item:nth-child(1) { animation-delay: 0.05s; }
+        .setting-item:nth-child(2) { animation-delay: 0.1s; }
+        .setting-item:nth-child(3) { animation-delay: 0.15s; }
+        .setting-item:nth-child(4) { animation-delay: 0.2s; }
+        .setting-item:nth-child(5) { animation-delay: 0.25s; }
+        .setting-item:nth-child(6) { animation-delay: 0.3s; }
+        .setting-item:nth-child(7) { animation-delay: 0.35s; }
+        .setting-item:nth-child(8) { animation-delay: 0.4s; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <button class="theme-toggle" id="themeToggle" title="Переключить тему">
+            <span id="themeIcon">🌙</span>
+        </button>
+        <h1>⚙️ Настройки</h1>
+        <p>Jut.su Extended</p>
+    </div>
+
+    <div id="settingsContainer">
+        <!-- Настройки будут добавлены автоматически -->
+    </div>
+
+    <div class="footer">
+        <button class="btn btn-reset" id="resetBtn">Сброс</button>
+        <button class="btn btn-close" id="closeBtn">Закрыть</button>
+    </div>
+
+    <div class="version">v1.0.4</div>
+
+    <div class="status-message success" id="statusMessage">
+        <span class="status-icon">✓</span>
+        <span class="status-text">Сохранено!</span>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>
