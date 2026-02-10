@@ -2,7 +2,7 @@
 // @name            Jut.su Auto Plus Core Library
 // @name:en         Jut.su Auto Plus Core Library
 // @namespace       http://tampermonkey.net/
-// @version         1.1.0
+// @version         1.1.1
 // @description     Ядро логики для Jut.su Auto Plus (API, обсерверы, парсинг названий, серверные функции донор/рецепиент)
 // @description:en  Core logic for Jut.su Auto Plus (API, observers, title parsing, donor/recipient server functions)
 // @author          Rodion
