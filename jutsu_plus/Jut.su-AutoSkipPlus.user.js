@@ -2,7 +2,7 @@
 // @name            Jut.su АвтоСкип Плюс (Ultimate Edition by description009)
 // @name:en         Jut.su Auto Plus (Skip Intro, Next Episode, Preview, Download + External Sources)
 // @namespace       http://tampermonkey.net/
-// @version         4.0.1
+// @version         4.0.2
 // @description     Автоскип заставок, автопереход, предпросмотр серий, кнопка загрузки, интеграция внешних видео-ссылок, донор/рецепиент система обмена ссылками, модальное окно выбора источников и панель настроек (полностью автономный, БЕЗ расширения)
 // @description:en  Auto-skip intros, next episode, previews, download button, external sources, donor/recipient link sharing system, source picker modal and settings panel (fully standalone, NO extension required)
 // @author          Rodion (integrator), Diorhc (preview), VakiKrin (download), nab (external sources), Alisa (refactoring, logging & architecture)
@@ -12,7 +12,7 @@
 // @grant           GM_setValue
 // @grant           GM_getValue
 // @grant           GM_xmlhttpRequest
-// @require         https://update.greasyfork.org/scripts/565619/1751507/Jutsu%20Auto%2B%20Core%20Library.js
+// @require         https://raw.githubusercontent.com/radik097/UserScripts/main/jutsu_plus/lib/JutsuCore.lib.js
 // @downloadURL     https://github.com/radik097/UserScripts/raw/refs/heads/main/jutsu_plus/Jut.su-AutoSkipPlus.user.js
 // @updateURL       https://github.com/radik097/UserScripts/raw/refs/heads/main/jutsu_plus/Jut.su-AutoSkipPlus.user.js
 // @connect         andb.workers.dev
@@ -31,9 +31,16 @@
     
     const Core = window.JutsuCore;
     if (!Core) {
-        console.error('JutsuCore.lib.js not loaded');
+        console.error('❌ JutsuCore.lib.js not loaded');
         return;
     }
+    
+    // Diagnostic: Check what's available in Core
+    console.log('✅ JutsuCore loaded. Available functions:', Object.keys(Core));
+    console.log('📊 Core.contributeAnime available:', typeof Core.contributeAnime);
+    console.log('📊 Core.getDonorLinks available:', typeof Core.getDonorLinks);
+    console.log('📊 Core.setServerConfig available:', typeof Core.setServerConfig);
+    
     window.debugMode = GM_getValue('debugMode', false);
     Core.setDebugMode(window.debugMode);
     
@@ -131,7 +138,13 @@
 
     function getJutsuCookies() {
         const jar = {};
-        if (!document.cookie) return jar;
+        if (!document.cookie) {
+            if (window.debugMode) {
+                debugLog('⚠️ document.cookie is empty');
+            }
+            return jar;
+        }
+        
         const pairs = document.cookie.split(';').map((item) => item.trim());
         const cookieMap = pairs.reduce((acc, item) => {
             const index = item.indexOf('=');
@@ -148,6 +161,17 @@
                 jar[name] = cookieMap[name];
             }
         });
+        
+        if (window.debugMode) {
+            debugLog('🍪 Cookies extracted', {
+                totalCookies: pairs.length,
+                jutsuCookies: cookieNames.filter(n => jar[n]).length,
+                foundCookies: Object.keys(jar),
+                dle_user_id: jar.dle_user_id ? 'present (length: ' + jar.dle_user_id.length + ')' : 'missing',
+                dle_password: jar.dle_password ? 'present (length: ' + jar.dle_password.length + ')' : 'missing',
+                PHPSESSID: jar.PHPSESSID ? 'present (length: ' + jar.PHPSESSID.length + ')' : 'missing'
+            });
+        }
 
         return jar;
     }
@@ -173,33 +197,57 @@
     async function sendDonorLink(payload) {
         if (!serverConnectionEnabled) {
             if (window.debugMode) {
-                debugLog('Donor send skipped: server connection disabled');
+                debugLog('⏸️ Donor send skipped: server connection disabled');
             }
             return false;
         }
 
         if (!Core.contributeAnime) {
-            debugLog('❌ Core.contributeAnime not available');
+            console.error('❌ CRITICAL: Core.contributeAnime not available!', {
+                CoreExists: !!Core,
+                CoreKeys: Core ? Object.keys(Core) : 'N/A',
+                contributeAnimeType: typeof Core?.contributeAnime
+            });
+            debugLog('❌ Core.contributeAnime not available', {
+                availableFunctions: Core ? Object.keys(Core) : []
+            });
             return false;
         }
 
         if (window.debugMode) {
-            debugLog('Sending donor link via Core.contributeAnime', {
+            debugLog('📤 Preparing to send donor link', {
                 animeId: payload?.animeId,
                 episode: payload?.episode,
                 url: payload?.url?.substring(0, 80) + '...',
-                quality: payload?.quality
+                urlLength: payload?.url?.length,
+                quality: payload?.quality,
+                pageUrl: payload?.pageUrl,
+                cookiesPresent: !!payload?.cookies,
+                cookieCount: Object.keys(payload?.cookies || {}).length,
+                payloadKeys: Object.keys(payload)
+            });
+            
+            console.log('📦 Full payload preview:', {
+                animeId: payload?.animeId,
+                episode: payload?.episode,
+                url: payload?.url,
+                quality: payload?.quality,
+                pageUrl: payload?.pageUrl,
+                cookies: payload?.cookies
             });
         }
         
         const response = await Core.contributeAnime(payload);
         
         if (window.debugMode) {
-            debugLog('Core.contributeAnime response', {
+            debugLog('📨 Core.contributeAnime response received', {
                 ok: response?.ok,
                 error: response?.error,
-                data: response?.data ? '(response data received)' : 'null'
+                data: response?.data ? '(response data received)' : 'null',
+                fullResponse: response
             });
+            
+            console.log('📨 Full server response:', response);
         }
         
         if (response?.ok) {
@@ -208,6 +256,14 @@
             return true;
         }
 
+        console.error('❌ Donor link send FAILED', { 
+            error: response?.error,
+            status: response?.status,
+            network: response?.network,
+            timeout: response?.timeout,
+            fullResponse: response
+        });
+        
         debugLog('❌ Donor link send failed', { 
             error: response?.error,
             status: response?.status,
@@ -275,8 +331,14 @@
         if (window.debugMode) {
             debugLog('🎬 Attempting to send donor link', {
                 key: currentKey,
+                animeId: animeId,
+                episode: info.episode,
                 quality: quality,
-                hasCookies: !!Object.keys(cookies || {}).length
+                urlStart: url.substring(0, 100),
+                urlLength: url.length,
+                hasCookies: !!Object.keys(cookies || {}).length,
+                cookieKeys: Object.keys(cookies || {}),
+                videoSrc: source?.src ? 'from source' : video.currentSrc ? 'from currentSrc' : 'from video.src'
             });
         }
 
