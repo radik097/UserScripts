@@ -193,5 +193,100 @@ class PriorityNavItem {
     }
 }
 
+function createServerStatusItem(role = 'unknown') {
+    const item = document.createElement('div');
+    item.className = 'vncenter donor-status';
+    item.dataset.serverStatus = 'true';
+
+    const label = document.createElement('span');
+    label.style.color = '#81a834';
+    label.style.cursor = 'pointer';
+    label.textContent = getServerStatusLabel(role);
+    label.title = getServerStatusTitle(role);
+
+    item.appendChild(label);
+    item.addEventListener('click', () => {
+        window.open('https://jutsu.fun/#server', '_blank');
+    });
+
+    return item;
+}
+
+function getServerStatusLabel(role) {
+    if (role === 'off') return '● Server Mode Disabled';
+    if (role === 'donor') return '● Donor Mode Active';
+    if (role === 'recipient') return '● Recipient Mode Active';
+    return '● Server Mode Active';
+}
+
+function getServerStatusTitle(role) {
+    if (role === 'off') return 'Серверные функции отключены';
+    if (role === 'donor') return 'Вы делитесь аниме с сообществом';
+    if (role === 'recipient') return 'Вы смотрите аниме благодаря донорам';
+    return 'Серверные функции включены';
+}
+
+function updateServerStatusElement(element, role) {
+    if (!element) return;
+    const label = element.querySelector('span');
+    if (!label) return;
+    label.textContent = getServerStatusLabel(role);
+    label.title = getServerStatusTitle(role);
+}
+
+async function initServerStatusIndicator() {
+    if (!window.SettingsStorage || typeof SettingsStorage.getSettings !== 'function') {
+        return;
+    }
+
+    const settings = await SettingsStorage.getSettings();
+    if (!settings.enableServerConnection) {
+        return;
+    }
+
+    const attachIndicator = (nav) => {
+        const existing = nav.querySelector('[data-server-status="true"]');
+        if (existing) {
+            updateServerStatusElement(existing, 'unknown');
+            return;
+        }
+
+        const statusItem = createServerStatusItem('unknown');
+        nav.appendChild(statusItem);
+    };
+
+    if (typeof waitForElement === 'function') {
+        waitForElement('.v_epi_nav', attachIndicator, 10000);
+    } else {
+        const nav = document.querySelector('.v_epi_nav');
+        if (nav) attachIndicator(nav);
+    }
+
+    window.addEventListener('jutsu-server-status', (event) => {
+        const role = event?.detail?.role || 'unknown';
+        const nav = document.querySelector('.v_epi_nav');
+        if (!nav) return;
+        const existing = nav.querySelector('[data-server-status="true"]');
+        if (!existing) {
+            attachIndicator(nav);
+        }
+        updateServerStatusElement(nav.querySelector('[data-server-status="true"]'), role);
+    });
+
+    if (SettingsStorage.onSettingsChanged) {
+        SettingsStorage.onSettingsChanged((changes) => {
+            if (!('enableServerConnection' in changes)) return;
+            const nav = document.querySelector('.v_epi_nav');
+            const existing = nav?.querySelector('[data-server-status="true"]');
+            if (changes.enableServerConnection) {
+                if (nav) attachIndicator(nav);
+            } else if (existing) {
+                existing.remove();
+            }
+        });
+    }
+}
+
 window.PriorityNavItem = PriorityNavItem;
 window.PRIORITY_NAV_ITEM = PRIORITY_NAV_ITEM;
+window.initServerStatusIndicator = initServerStatusIndicator;

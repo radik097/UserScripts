@@ -17,6 +17,8 @@
 // @updateURL       https://github.com/radik097/UserScripts/raw/refs/heads/main/jutsu_plus/Jut.su-AutoSkipPlus.user.js
 // @connect         andb.workers.dev
 // @connect         consumet-api-yij6.onrender.com
+// @connect         jutsu.fun
+// @connect         backup-domain.com
 // @run-at          document-start
 // ==/UserScript==
  
@@ -113,6 +115,282 @@
         return Core.buildTitleVariants(rawTitle, episode);
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // EXTENSION BRIDGE (Donor/Recipient Sharing)
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    let serverConnectionEnabled = false;
+    let donorObserver = null;
+    let donorSentKey = null;
+    let settingsListenerAttached = false;
+
+    function dispatchServerStatus(role) {
+        window.dispatchEvent(new CustomEvent('jutsu-server-status', {
+            detail: { role: role }
+        }));
+    }
+
+    function callExtension(action, data) {
+        if (!isExtensionAvailable()) {
+            return Promise.resolve({ success: false, error: 'Extension not available' });
+        }
+        return new Promise((resolve) => {
+            const requestId = `req_${Date.now()}_${Math.random()}`;
+
+            const handler = (event) => {
+                if (event.source !== window) return;
+                if (!event.data || event.data.type !== 'BACKGROUND_RESPONSE') return;
+                if (event.data.requestId !== requestId) return;
+
+                window.removeEventListener('message', handler);
+                resolve(event.data);
+            };
+
+            window.addEventListener('message', handler);
+            window.postMessage({
+                type: 'BACKGROUND_REQUEST',
+                action: action,
+                requestId: requestId,
+                data: data
+            }, '*');
+
+            setTimeout(() => {
+                window.removeEventListener('message', handler);
+                resolve({ success: false, error: 'Timeout waiting for background response' });
+            }, 8000);
+        });
+    }
+
+    function isExtensionAvailable() {
+        return typeof window.SettingsStorage !== 'undefined';
+    }
+
+    function getCookieMap(names) {
+        const jar = {};
+        if (!document.cookie) return jar;
+        const pairs = document.cookie.split(';').map((item) => item.trim());
+        const cookieMap = pairs.reduce((acc, item) => {
+            const index = item.indexOf('=');
+            if (index === -1) return acc;
+            const key = item.slice(0, index);
+            const value = item.slice(index + 1);
+            acc[key] = value;
+            return acc;
+        }, {});
+
+        (names || []).forEach((name) => {
+            if (cookieMap[name]) {
+                jar[name] = cookieMap[name];
+            }
+        });
+
+        return jar;
+    }
+
+    function updateServerConnectionEnabled(value) {
+        serverConnectionEnabled = !!value;
+        if (serverConnectionEnabled) {
+            startDonorObserver();
+        } else {
+            stopDonorObserver();
+            dispatchServerStatus('off');
+        }
+    }
+
+    async function syncExtensionSettings() {
+        if (!isExtensionAvailable() || !window.SettingsStorage.getSettings) {
+            updateServerConnectionEnabled(GM_getValue('enableServerConnection', true));
+            return;
+        }
+
+        const extSettings = await window.SettingsStorage.getSettings();
+        updateServerConnectionEnabled(extSettings.enableServerConnection);
+
+        if (!settingsListenerAttached && window.SettingsStorage.onSettingsChanged) {
+            settingsListenerAttached = true;
+            window.SettingsStorage.onSettingsChanged((changes) => {
+                if ('enableServerConnection' in changes) {
+                    updateServerConnectionEnabled(changes.enableServerConnection);
+                }
+            });
+        }
+    }
+
+    async function getJutsuCookies() {
+        if (!isExtensionAvailable()) {
+            return getCookieMap(['dle_user_id', 'dle_password', 'PHPSESSID']);
+        }
+
+        const response = await callExtension('GET_COOKIES', {
+            url: window.location.href,
+            names: ['dle_user_id', 'dle_password', 'PHPSESSID']
+        });
+
+        if (response?.success) {
+            return response.data || {};
+        }
+
+        return {};
+    }
+
+    function isShareableUrl(url) {
+        return typeof url === 'string' && url.startsWith('https://') && !url.startsWith('blob:');
+    }
+
+    function getAnimeIdFromPath() {
+        return window.location.pathname.split('/').filter(Boolean)[0] || null;
+    }
+
+    async function sendDonorLink(payload) {
+        if (!serverConnectionEnabled) return false;
+
+        if (!isExtensionAvailable() && Core.contributeAnime) {
+            const response = await Core.contributeAnime(payload);
+            if (response?.ok) {
+                alisaLog('[VIDEO]', 'Donor link sent to server');
+                dispatchServerStatus('donor');
+                return true;
+            }
+
+            if (window.debugMode) {
+                debugLog('Donor link send failed', { error: response?.error });
+            }
+            return false;
+        }
+
+        const response = await callExtension('CONTRIBUTE_ANIME', payload);
+        if (response?.success) {
+            alisaLog('[VIDEO]', 'Donor link sent to server');
+            dispatchServerStatus('donor');
+            return true;
+        }
+
+        if (window.debugMode) {
+            debugLog('Donor link send failed', { error: response?.error });
+        }
+        return false;
+    }
+
+    async function maybeSendDonorLink() {
+        if (!serverConnectionEnabled) return;
+
+        const info = getEpisodeInfo();
+        const animeId = getAnimeIdFromPath();
+        if (!info?.episode || !animeId) return;
+
+        const currentKey = `${animeId}:${info.episode}`;
+        if (donorSentKey === currentKey) return;
+
+        const video = document.querySelector('video#my-player_html5_api, video');
+        if (!video) return;
+
+        const source = video.querySelector('source[src]');
+        const url = source?.src || video.currentSrc || video.src;
+        if (!isShareableUrl(url)) return;
+
+        const quality = source?.getAttribute('label') || source?.getAttribute('res') || 'auto';
+        const cookies = await getJutsuCookies();
+
+        const payload = {
+            animeId: animeId,
+            episode: info.episode,
+            url: url,
+            quality: quality,
+            pageUrl: window.location.href,
+            cookies: cookies
+        };
+
+        const sent = await sendDonorLink(payload);
+        if (sent) {
+            donorSentKey = currentKey;
+        }
+    }
+
+    function startDonorObserver() {
+        if (donorObserver) return;
+
+        donorObserver = new MutationObserver(() => {
+            maybeSendDonorLink();
+        });
+
+        donorObserver.observe(document.documentElement, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['src']
+        });
+
+        maybeSendDonorLink();
+    }
+
+    function stopDonorObserver() {
+        if (!donorObserver) return;
+        donorObserver.disconnect();
+        donorObserver = null;
+    }
+
+    function normalizeDonorLinks(links) {
+        return (links || [])
+            .map((link, index) => {
+                if (typeof link === 'string') {
+                    return { url: link, quality: 'auto', id: `donor_${index}` };
+                }
+                if (link && link.url) {
+                    return {
+                        url: link.url,
+                        quality: link.quality || link.resolution || 'auto',
+                        id: link.id || `donor_${index}`
+                    };
+                }
+                return null;
+            })
+            .filter((link) => link && isShareableUrl(link.url));
+    }
+
+    async function tryGetDonorLinks() {
+        if (!serverConnectionEnabled) return [];
+
+        const info = getEpisodeInfo();
+        const animeId = getAnimeIdFromPath();
+        if (!info?.episode || !animeId) return [];
+
+        const cookies = await getJutsuCookies();
+        let response = null;
+        const payload = {
+            animeId: animeId,
+            episode: info.episode,
+            pageUrl: window.location.href,
+            cookies: cookies
+        };
+
+        if (!isExtensionAvailable() && Core.getDonorLinks) {
+            response = await Core.getDonorLinks(payload);
+        } else {
+            response = await callExtension('GET_DONOR_LINKS', payload);
+        }
+
+        if ((response?.success === false) || (response?.ok === false)) {
+            if (window.debugMode) {
+                debugLog('Donor links request failed', { error: response?.error });
+            }
+            return [];
+        }
+
+        const donorLinks = normalizeDonorLinks(response.data?.links || response.data);
+        if (donorLinks.length) {
+            dispatchServerStatus('recipient');
+        }
+        return donorLinks.map((link) => ({
+            id: link.id,
+            title: 'Donor Source',
+            provider: 'donor',
+            type: 'donor',
+            link: link.url,
+            urls: { default: link.url },
+            quality: link.quality
+        }));
+    }
+
     function getProviderOrder(primary) {
         const order = PROVIDER_ORDER.slice();
         const normalized = order.includes(primary) ? primary : 'consumet';
@@ -148,12 +426,17 @@
         previewEnabled: GM_getValue('previewEnabled', true),
         downloadButton: GM_getValue('downloadButton', true),
         externalInject: GM_getValue('externalInject', true),
+        enableServerConnection: GM_getValue('enableServerConnection', true),
         debugMode: GM_getValue('debugMode', false),
         providerPrimary: GM_getValue('providerPrimary', 'consumet')
     };
     
     const API_URL = 'https://api.andb.workers.dev/search';
     const API_TIMEOUT = 5000;
+    const SERVER_CONFIG = {
+        primary: 'https://jutsu.fun',
+        fallback: 'https://backup-domain.com'
+    };
     const PROVIDER_BASE_URLS = {
         consumet: 'https://consumet-api-yij6.onrender.com'
     };
@@ -176,10 +459,18 @@
         servers: CONSUMET_SERVERS,
         categories: CONSUMET_CATEGORIES
     });
+
+    if (Core.setServerConfig) {
+        Core.setServerConfig(SERVER_CONFIG);
+    }
     
     function updateSetting(key, value) {
         settings[key] = value;
         GM_setValue(key, value);
+
+        if (key === 'enableServerConnection') {
+            updateServerConnectionEnabled(value);
+        }
         
         // Special handling for Debug Mode
         if (key === 'debugMode') {
@@ -215,6 +506,7 @@
         GM_registerMenuCommand(`Превью: ${settings.previewEnabled ? '✅' : '❌'}`, () => updateSetting('previewEnabled', !settings.previewEnabled));
         GM_registerMenuCommand(`Загрузка: ${settings.downloadButton ? '✅' : '❌'}`, () => updateSetting('downloadButton', !settings.downloadButton));
         GM_registerMenuCommand(`Внешн. источники: ${settings.externalInject ? '✅' : '❌'}`, () => updateSetting('externalInject', !settings.externalInject));
+        GM_registerMenuCommand(`Серверные функции: ${settings.enableServerConnection ? '✅' : '❌'}`, () => updateSetting('enableServerConnection', !settings.enableServerConnection));
         GM_registerMenuCommand('Провайдер: consumet', () => cycleProviderPrimary());
         const sep2 = GM_registerMenuCommand('────────────────────', () => {});
         GM_registerMenuCommand(`🔧 Debug Mode: ${settings.debugMode ? '🟢 ON' : '⚫ OFF'}`, () => updateSetting('debugMode', !settings.debugMode));
@@ -831,6 +1123,17 @@
                 }
             }
 
+            const donorResults = await tryGetDonorLinks();
+            if (donorResults.length) {
+                progress.complete(true, 'Источники доноров найдены! Загружаем…');
+                alisaLog('[VIDEO]', `✅ Found ${donorResults.length} donor link(s)`);
+                debugLog('Donor fallback succeeded', {
+                    resultsCount: donorResults.length
+                });
+                callback(donorResults, titles[0], 'donor');
+                return;
+            }
+
             // No sources found after all attempts
             progress.complete(false, 'Источники не найдены, используется оригинал');
             alisaLog('[VIDEO]', '❌ No external sources found after exhausting all providers');
@@ -1285,6 +1588,15 @@
         
         return { disconnect: () => observerManager.disconnect('externalSourceObserver') };
     }
+
+    function initDonorLogic() {
+        if (!isExtensionAvailable()) {
+            return { disconnect: () => {} };
+        }
+
+        syncExtensionSettings();
+        return { disconnect: () => stopDonorObserver() };
+    }
     
     async function handleVideoFound(videoElement) {
         debugLog('🎬 Video element found, starting source injection process', {
@@ -1456,6 +1768,7 @@
             { key: 'previewEnabled', label: '🖼️ Превью эпизодов' },
             { key: 'downloadButton', label: '⬇️ Кнопка скачивания' },
             { key: 'externalInject', label: '🌐 Внешние источники (в разработке)' },
+            { key: 'enableServerConnection', label: '🤝 Серверные функции (доноры)' },
             { key: 'debugMode', label: '🔧 Debug Mode' }
         ];
         
@@ -1607,6 +1920,8 @@
             debugMode: window.debugMode,
             timestamp: new Date().toISOString()
         });
+
+        syncExtensionSettings();
         
         // Inject styles first
         injectGlobalStyles();
@@ -1629,6 +1944,7 @@
         window.alisaModules.push(initPreview());
         window.alisaModules.push(initDownload());
         window.alisaModules.push(initExternalSources());
+        window.alisaModules.push(initDonorLogic());
         
         const initDuration = Math.round(performance.now() - initStartTime);
         debugLog(`All ${window.alisaModules.length} feature modules initialized`, {

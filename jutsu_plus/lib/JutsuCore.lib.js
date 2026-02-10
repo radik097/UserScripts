@@ -10,6 +10,8 @@
 // @updateURL       https://raw.githubusercontent.com/radik097/UserScripts/main/jutsu_plus/lib/JutsuCore.lib.js
 // @match           https://jut.su/*
 // @grant           GM_xmlhttpRequest
+// @connect         jutsu.fun
+// @connect         backup-domain.com
 // @license         MIT
 // ==/UserScript==
 
@@ -30,12 +32,24 @@
 		servers: ['hd-1', 'vidstreaming', 'megacloud'],
 		categories: ['sub', 'dub', 'raw']
 	};
+
+	const SERVER_CONFIG = {
+		primary: 'https://jutsu.fun',
+		fallback: 'https://backup-domain.com'
+	};
+
+	let currentServer = SERVER_CONFIG.primary;
  
 	const logs = [];
 	let debugMode = false;
  
 	function setConfig(partial) {
 		Object.assign(CONFIG, partial || {});
+	}
+
+	function setServerConfig(partial) {
+		Object.assign(SERVER_CONFIG, partial || {});
+		currentServer = SERVER_CONFIG.primary;
 	}
  
 	function setDebugMode(value) {
@@ -225,6 +239,98 @@
 			};
  
 			attempt(0);
+		});
+	}
+
+	function gmRequestServerJson(url, options = {}) {
+		const { method = 'GET', data = null, contextLabel = 'server.request' } = options;
+
+		return new Promise((resolve) => {
+			const startTime = performance.now();
+
+			GM_xmlhttpRequest({
+				method: method,
+				url: url,
+				timeout: CONFIG.timeout,
+				headers: {
+					'Content-Type': 'application/json',
+					'Accept': 'application/json'
+				},
+				data: data ? JSON.stringify(data) : null,
+				onload: (response) => {
+					const duration = Math.round(performance.now() - startTime);
+					const parsed = validateAPIResponse(response);
+					if (parsed) {
+						if (debugMode) {
+							debug('Server response parsed', {
+								context: contextLabel,
+								status: response.status,
+								duration: `${duration}ms`
+							});
+						}
+						resolve({ ok: true, data: parsed });
+						return;
+					}
+
+					if (debugMode) {
+						debug('Server response invalid', {
+							context: contextLabel,
+							status: response.status,
+							duration: `${duration}ms`
+						});
+					}
+					resolve({ ok: false, error: `Invalid response (${response.status})` });
+				},
+				onerror: (error) => {
+					const errorMsg = error?.error?.message || error?.message || 'Unknown network error';
+					resolve({ ok: false, error: errorMsg });
+				},
+				ontimeout: () => {
+					resolve({ ok: false, error: 'Request timeout' });
+				}
+			});
+		});
+	}
+
+	async function requestServerWithFallback(path, options) {
+		const primaryUrl = `${currentServer}${path}`;
+		let response = await gmRequestServerJson(primaryUrl, options);
+
+		if (response.ok) {
+			return response;
+		}
+
+		if (currentServer === SERVER_CONFIG.primary && SERVER_CONFIG.fallback) {
+			currentServer = SERVER_CONFIG.fallback;
+			const fallbackUrl = `${currentServer}${path}`;
+			response = await gmRequestServerJson(fallbackUrl, options);
+			if (response.ok) {
+				return response;
+			}
+		}
+
+		return response;
+	}
+
+	async function contributeAnime(payload) {
+		return requestServerWithFallback('/contribute', {
+			method: 'POST',
+			data: payload,
+			contextLabel: 'server.contribute'
+		});
+	}
+
+	async function getDonorLinks(payload) {
+		const query = new URLSearchParams({
+			anime: payload?.animeId || '',
+			ep: payload?.episode || ''
+		}).toString();
+		const path = `/links?${query}`;
+
+		return requestServerWithFallback(path, {
+			method: 'GET',
+			data: null,
+			contextLabel: 'server.links'
 		});
 	}
  
@@ -430,12 +536,15 @@
  
 	return {
 		setConfig,
+		setServerConfig,
 		setDebugMode,
 		log,
 		debug,
 		flushLogs,
 		observerManager,
 		gmRequestJson,
+		contributeAnime,
+		getDonorLinks,
 		getEpisodeInfo,
 		buildTitleVariants,
 		pickEpisode,

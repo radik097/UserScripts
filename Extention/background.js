@@ -262,6 +262,22 @@ async function handleMessage(request, sender, sendResponse) {
                 });
                 break;
 
+            case 'CONTRIBUTE_ANIME':
+                const contributeResult = await handleContributeAnime(request.data);
+                sendResponse({
+                    success: true,
+                    data: contributeResult
+                });
+                break;
+
+            case 'GET_DONOR_LINKS':
+                const donorLinks = await handleGetDonorLinks(request.data);
+                sendResponse({
+                    success: true,
+                    data: donorLinks
+                });
+                break;
+
             default:
                 sendResponse({ 
                     success: false, 
@@ -378,6 +394,62 @@ async function handleSendVideoData(videoData) {
         return result;
     } catch (error) {
         //console.error('[Background] ❌ Ошибка отправки на сервер:', error);
+        throw error;
+    }
+}
+
+/**
+ * Отправить донорскую ссылку на сервер
+ */
+async function handleContributeAnime(payload) {
+    const endpoint = `${currentServer}/contribute`;
+
+    try {
+        const response = await fetchWithFallback(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            throw new Error(`Server error: ${response.status} ${response.statusText}`);
+        }
+
+        return await response.json();
+    } catch (error) {
+        //console.error('[Background] ❌ Ошибка отправки донорской ссылки:', error);
+        throw error;
+    }
+}
+
+/**
+ * Запросить ссылки доноров с сервера
+ */
+async function handleGetDonorLinks(payload) {
+    const query = new URLSearchParams({
+        anime: payload?.animeId || '',
+        ep: payload?.episode || ''
+    });
+    const endpoint = `${currentServer}/links?${query.toString()}`;
+
+    try {
+        const response = await fetchWithFallback(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            throw new Error(`Server error: ${response.status} ${response.statusText}`);
+        }
+
+        return await response.json();
+    } catch (error) {
+        //console.error('[Background] ❌ Ошибка запроса донорских ссылок:', error);
         throw error;
     }
 }

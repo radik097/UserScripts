@@ -147,6 +147,10 @@
     if (window.PriorityNavItem) {
         PriorityNavItem.init();
     }
+
+    if (typeof initServerStatusIndicator === 'function') {
+        initServerStatusIndicator();
+    }
     
     // Если кнопка достижений отключена, завершаем инициализацию
     if (!settings.showAchievementsButton) {
