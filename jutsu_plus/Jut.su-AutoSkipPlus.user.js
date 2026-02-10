@@ -1896,8 +1896,6 @@
             debugMode: window.debugMode,
             timestamp: new Date().toISOString()
         });
-
-        syncExtensionSettings();
         
         // Inject styles first
         injectGlobalStyles();
