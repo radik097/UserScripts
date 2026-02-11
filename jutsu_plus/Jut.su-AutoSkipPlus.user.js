@@ -12,6 +12,7 @@
 // @grant           GM_setValue
 // @grant           GM_getValue
 // @grant           GM_xmlhttpRequest
+// @require         https://cdn.jsdelivr.net/npm/@octokit/core/dist-web/index.js
 // @require         https://update.greasyfork.org/scripts/565619/1752087/Jutsu%20Auto%2B%20Core%20Library.js
 // @downloadURL     https://github.com/radik097/UserScripts/raw/refs/heads/main/jutsu_plus/Jut.su-AutoSkipPlus.user.js
 // @updateURL       https://github.com/radik097/UserScripts/raw/refs/heads/main/jutsu_plus/Jut.su-AutoSkipPlus.user.js
@@ -19,6 +20,8 @@
 // @connect         consumet-api-yij6.onrender.com
 // @connect         jutsu.fun
 // @connect         backup-domain.com
+// @connect         api.github.com
+// @connect         raw.githubusercontent.com
 // @run-at          document-start
 // ==/UserScript==
  
@@ -273,8 +276,8 @@
     }
 
     async function maybeSendDonorLink() {
-        if (!serverConnectionEnabled) {
-            if (window.debugMode) debugLog('maybeSendDonorLink: server connection disabled');
+        if (!serverConnectionEnabled && !settings.githubSync) {
+            if (window.debugMode) debugLog('maybeSendDonorLink: communication disabled (server & github)');
             return;
         }
 
@@ -317,33 +320,52 @@
         }
 
         const quality = source?.getAttribute('label') || source?.getAttribute('res') || 'auto';
-        const cookies = await getJutsuCookies();
 
-        const payload = {
-            animeId: animeId,
-            episode: info.episode,
-            url: url,
-            quality: quality,
-            pageUrl: window.location.href,
-            cookies: cookies
-        };
-
-        if (window.debugMode) {
-            debugLog('🎬 Attempting to send donor link', {
-                key: currentKey,
+        // 1. Primary Server Sync
+        if (serverConnectionEnabled) {
+            const cookies = await getJutsuCookies();
+            const payload = {
                 animeId: animeId,
                 episode: info.episode,
+                url: url,
                 quality: quality,
-                urlStart: url.substring(0, 100),
-                urlLength: url.length,
-                hasCookies: !!Object.keys(cookies || {}).length,
-                cookieKeys: Object.keys(cookies || {}),
-                videoSrc: source?.src ? 'from source' : video.currentSrc ? 'from currentSrc' : 'from video.src'
-            });
+                pageUrl: window.location.href,
+                cookies: cookies
+            };
+
+            if (window.debugMode) {
+                debugLog('🎬 Attempting to send donor link to primary server', {
+                    key: currentKey,
+                    quality: quality
+                });
+            }
+
+            const sent = await sendDonorLink(payload);
+            if (sent) donorSentKey = currentKey;
         }
 
-        const sent = await sendDonorLink(payload);
-        if (sent) {
+        // 2. GitHub Sync (if plus user)
+        if (settings.githubSync && settings.githubRepo && settings.githubToken && Core.isPlusUser()) {
+            const episodeKey = `${animeId}/episode_${info.episode}`;
+            
+            if (window.debugMode) debugLog('☁️ Syncing to GitHub', { episodeKey, quality });
+            
+            await Core.githubUpdate(settings.githubRepo, settings.githubPath, settings.githubToken, (db) => {
+                const existing = db[episodeKey];
+                const shouldUpdate = !existing || 
+                                     (quality === '1080p' && existing.quality !== '1080p') ||
+                                     (new Date() - new Date(existing.updated_at) > 10800000);
+                
+                if (shouldUpdate) {
+                    db[episodeKey] = {
+                        url: url,
+                        quality: quality,
+                        updated_at: new Date().toISOString()
+                    };
+                    return db;
+                }
+                return null;
+            });
             donorSentKey = currentKey;
         }
     }
@@ -390,47 +412,67 @@
     }
 
     async function tryGetDonorLinks() {
-        if (!serverConnectionEnabled) return [];
+        if (!serverConnectionEnabled && !settings.githubSync) return [];
 
         const info = getEpisodeInfo();
         const animeId = getAnimeIdFromPath();
         if (!info?.episode || !animeId) return [];
 
-        if (!Core.getDonorLinks) {
-            debugLog('❌ Core.getDonorLinks not available');
-            return [];
-        }
+        const allLinks = [];
 
-        const cookies = await getJutsuCookies();
-        const payload = {
-            animeId: animeId,
-            episode: info.episode,
-            pageUrl: window.location.href,
-            cookies: cookies
-        };
-
-        const response = await Core.getDonorLinks(payload);
-
-        if (response?.ok === false) {
-            if (window.debugMode) {
-                debugLog('Donor links request failed', { error: response?.error });
+        // 1. GitHub Links
+        if (settings.githubSync && settings.githubRepo) {
+            if (window.debugMode) debugLog('☁️ Checking GitHub for donor links...');
+            const db = await Core.githubFetch(settings.githubRepo, settings.githubPath);
+            const episodeKey = `${animeId}/episode_${info.episode}`;
+            if (db && db[episodeKey]) {
+                const item = db[episodeKey];
+                allLinks.push({
+                    id: 'github_donor',
+                    title: 'GitHub Community Source',
+                    provider: 'github',
+                    type: 'donor',
+                    link: item.url,
+                    urls: { [item.quality || 'auto']: item.url },
+                    quality: item.quality
+                });
+                if (window.debugMode) debugLog('☁️ Found Link in GitHub DB', { quality: item.quality });
             }
-            return [];
         }
 
-        const donorLinks = normalizeDonorLinks(response.data?.links || response.data);
-        if (donorLinks.length) {
+        // 2. Primary Server Links
+        if (serverConnectionEnabled) {
+            if (Core.getDonorLinks) {
+                const cookies = await getJutsuCookies();
+                const payload = {
+                    animeId: animeId,
+                    episode: info.episode,
+                    pageUrl: window.location.href,
+                    cookies: cookies
+                };
+
+                const response = await Core.getDonorLinks(payload);
+                if (response?.ok !== false) {
+                    const donorLinks = normalizeDonorLinks(response.data?.links || response.data);
+                    donorLinks.forEach((link) => {
+                        allLinks.push({
+                            id: link.id,
+                            title: 'Donor Source',
+                            provider: 'donor',
+                            type: 'donor',
+                            link: link.url,
+                            urls: { default: link.url },
+                            quality: link.quality
+                        });
+                    });
+                }
+            }
+        }
+
+        if (allLinks.length) {
             dispatchServerStatus('recipient');
         }
-        return donorLinks.map((link) => ({
-            id: link.id,
-            title: 'Donor Source',
-            provider: 'donor',
-            type: 'donor',
-            link: link.url,
-            urls: { default: link.url },
-            quality: link.quality
-        }));
+        return allLinks;
     }
 
     function getProviderOrder(primary) {
@@ -470,7 +512,11 @@
         externalInject: GM_getValue('externalInject', true),
         enableServerConnection: GM_getValue('enableServerConnection', true),
         debugMode: GM_getValue('debugMode', false),
-        providerPrimary: GM_getValue('providerPrimary', 'consumet')
+        providerPrimary: GM_getValue('providerPrimary', 'consumet'),
+        githubSync: GM_getValue('githubSync', false),
+        githubRepo: GM_getValue('githubRepo', ''),
+        githubPath: GM_getValue('githubPath', 'links.json'),
+        githubToken: GM_getValue('githubToken', '')
     };
     
     const API_URL = 'https://api.andb.workers.dev/search';
@@ -549,6 +595,7 @@
         GM_registerMenuCommand(`Загрузка: ${settings.downloadButton ? '✅' : '❌'}`, () => updateSetting('downloadButton', !settings.downloadButton));
         GM_registerMenuCommand(`Внешн. источники: ${settings.externalInject ? '✅' : '❌'}`, () => updateSetting('externalInject', !settings.externalInject));
         GM_registerMenuCommand(`Серверные функции: ${settings.enableServerConnection ? '✅' : '❌'}`, () => updateSetting('enableServerConnection', !settings.enableServerConnection));
+        GM_registerMenuCommand(`GitHub Sync: ${settings.githubSync ? '✅' : '❌'}`, () => updateSetting('githubSync', !settings.githubSync));
         GM_registerMenuCommand('Провайдер: consumet', () => cycleProviderPrimary());
         const sep2 = GM_registerMenuCommand('────────────────────', () => {});
         GM_registerMenuCommand(`🔧 Debug Mode: ${settings.debugMode ? '🟢 ON' : '⚫ OFF'}`, () => updateSetting('debugMode', !settings.debugMode));
@@ -865,6 +912,15 @@
                 toggle.classList.toggle('active', value);
             }
         });
+
+        // GitHub sync visibility & group handling
+        const githubGroup = panel.querySelector('.alisa-github-config');
+        if (githubGroup) {
+            githubGroup.style.display = settings.githubSync ? 'block' : 'none';
+        } else if (settings.githubSync) {
+            // If group should be shown but was not created because githubSync was false,
+            // we might want to refresh the panel. But for now, user can just reopen it.
+        }
 
         const providerSelect = panel.querySelector('[data-provider-select]');
         if (providerSelect) {
@@ -1807,6 +1863,7 @@
             { key: 'downloadButton', label: '⬇️ Кнопка скачивания' },
             { key: 'externalInject', label: '🌐 Внешние источники (в разработке)' },
             { key: 'enableServerConnection', label: '🤝 Серверные функции (доноры)' },
+            { key: 'githubSync', label: '☁️ GitHub Sync (Donors & Recepients)' },
             { key: 'debugMode', label: '🔧 Debug Mode' }
         ];
         
@@ -1866,6 +1923,48 @@
         providerItem.appendChild(providerSelect);
         panel.appendChild(providerItem);
         
+        // GitHub Config (Visible if GitHub Sync is enabled)
+        if (settings.githubSync) {
+            const githubGroup = document.createElement('div');
+            githubGroup.className = 'alisa-github-config';
+            githubGroup.style.cssText = 'padding: 10px; background: #222; border-radius: 8px; margin: 10px 0; border-left: 3px solid #6e5494;';
+
+            const createInput = (key, label, placeholder, type = 'text') => {
+                const wrapper = document.createElement('div');
+                wrapper.style.margin = '8px 0';
+                const lbl = document.createElement('div');
+                lbl.style.fontSize = '11px';
+                lbl.style.color = '#888';
+                lbl.textContent = label;
+                const input = document.createElement('input');
+                input.type = type;
+                input.className = 'alisa-input';
+                input.style.width = '100%';
+                input.style.background = '#111';
+                input.style.border = '1px solid #444';
+                input.style.color = '#fff';
+                input.style.padding = '5px';
+                input.style.borderRadius = '4px';
+                input.value = settings[key] || '';
+                input.placeholder = placeholder;
+                input.addEventListener('change', (e) => updateSetting(key, e.target.value));
+                wrapper.appendChild(lbl);
+                wrapper.appendChild(input);
+                return wrapper;
+            };
+
+            githubGroup.appendChild(createInput('githubRepo', 'Repository (owner/repo)', 'eg: radik097/jutsu-links'));
+            githubGroup.appendChild(createInput('githubPath', 'JSON Path', 'links.json'));
+            githubGroup.appendChild(createInput('githubToken', 'GitHub PAT (Fine-grained recommended)', 'ghp_...', 'password'));
+
+            const ghHint = document.createElement('div');
+            ghHint.style.cssText = 'font-size: 10px; color: #888; margin-top: 5px;';
+            ghHint.textContent = '🔒 Токен хранится локально (GM_setValue). Необходим только для записи ссылок (донорам).';
+            githubGroup.appendChild(ghHint);
+
+            panel.appendChild(githubGroup);
+        }
+
         // Divider
         const divider = document.createElement('div');
         divider.style.cssText = 'border-top: 1px solid #444; margin: 12px 0;';

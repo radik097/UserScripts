@@ -387,6 +387,174 @@
 		return result;
 	}
 
+	// ========================================================================
+	// GITHUB SYNC DATABASE SYSTEM
+	// ========================================================================
+
+	const GitHubQueue = {
+		queue: Promise.resolve(),
+		async add(task) {
+			this.queue = this.queue.then(async () => {
+				try {
+					await task();
+				} catch (err) {
+					log('[ERROR]', 'GitHub Queue task failed', { error: err.message });
+				}
+			});
+			return this.queue;
+		}
+	};
+
+	function isPlusUser() {
+		// Detection of jut.su+ subscription
+		const hasPlusClass = !!document.querySelector('.player_plus_active');
+		const hasPlusPlayer = !!document.querySelector('#my-player.vjs-plus-player');
+		const hasPlusVar = typeof window.is_plus !== 'undefined' ? !!window.is_plus : false;
+		
+		const result = hasPlusClass || hasPlusPlayer || hasPlusVar;
+		if (debugMode) debug('Subscription check', { isPlus: result, hasPlusClass, hasPlusPlayer, hasPlusVar });
+		return result;
+	}
+
+	async function githubFetch(repo, path) {
+		if (!repo || !path) return null;
+		
+		const url = `https://raw.githubusercontent.com/${repo}/main/${path}?t=${Date.now()}`;
+		try {
+			const res = await fetch(url);
+			if (!res.ok) {
+				if (res.status !== 404) log('[ERROR]', `GitHub Fetch failed: ${res.status}`);
+				return null;
+			}
+			return await res.json();
+		} catch (e) {
+			log('[ERROR]', 'GitHub Fetch exception', { error: e.message });
+			return null;
+		}
+	}
+
+	async function githubUpdate(repo, path, token, updateFn) {
+		if (!repo || !path || !token || typeof updateFn !== 'function') {
+			log('[ERROR]', 'githubUpdate: Missing parameters');
+			return;
+		}
+
+		return GitHubQueue.add(async () => {
+			const [owner, repoName] = repo.split('/');
+			if (!owner || !repoName) {
+				log('[ERROR]', 'githubUpdate: Invalid repo format (expected owner/repo)');
+				return;
+			}
+
+			let octokit;
+			try {
+				// Use Octokit if available (from @require)
+				const OctokitRef = window.Octokit || (typeof Octokit !== 'undefined' ? Octokit : null);
+				if (OctokitRef) {
+					octokit = new OctokitRef({ auth: token });
+					debug('GitHub Sync: Using Octokit Core');
+				}
+			} catch (e) {
+				debug('GitHub Sync: Octokit initialization failed, falling back to manual');
+			}
+
+			let sha = null;
+			let currentData = {};
+
+			try {
+				if (octokit) {
+					// 1. Get SHA and current data via Octokit
+					const res = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {
+						owner,
+						repo: repoName,
+						path,
+						headers: { 'cache-control': 'no-cache' }
+					});
+
+					if (res.status === 200) {
+						sha = res.data.sha;
+						const decoded = decodeURIComponent(escape(atob(res.data.content.replace(/\s/g, ''))));
+						currentData = JSON.parse(decoded);
+					}
+				} else {
+					// Manual Fallback (GM_xmlhttpRequest)
+					const res = await new Promise(resolve => {
+						GM_xmlhttpRequest({
+							method: 'GET',
+							url: `https://api.github.com/repos/${repo}/contents/${path}`,
+							headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' },
+							onload: resolve,
+							onerror: (e) => resolve({ status: 500, statusText: e.message })
+						});
+					});
+
+					if (res.status === 200) {
+						const data = JSON.parse(res.responseText);
+						sha = data.sha;
+						const decoded = decodeURIComponent(escape(atob(data.content.replace(/\s/g, ''))));
+						currentData = JSON.parse(decoded);
+					} else if (res.status !== 404) {
+						throw new Error(`GitHub API error ${res.status}`);
+					}
+				}
+			} catch (e) {
+				if (e.status !== 404) {
+					log('[ERROR]', 'GitHub Fetch failed during sync', { error: e.message });
+					return; // Stop if it's a real error (not 404)
+				}
+				debug('GitHub file not found, will create new one');
+			}
+
+			// 2. Prepare new data
+			const newData = updateFn(currentData);
+			if (!newData) {
+				debug('GitHub sync: No changes to push');
+				return;
+			}
+
+			const jsonStr = JSON.stringify(newData, null, 2);
+			const base64 = btoa(unescape(encodeURIComponent(jsonStr)));
+
+			// 3. Push to GitHub
+			try {
+				if (octokit) {
+					await octokit.request('PUT /repos/{owner}/{repo}/contents/{path}', {
+						owner,
+						repo: repoName,
+						path,
+						message: `Sync Links DB: ${new Date().toISOString()}`,
+						content: base64,
+						sha: sha
+					});
+				} else {
+					const putRes = await new Promise(resolve => {
+						GM_xmlhttpRequest({
+							method: 'PUT',
+							url: `https://api.github.com/repos/${repo}/contents/${path}`,
+							headers: {
+								'Authorization': `token ${token}`,
+								'Accept': 'application/vnd.github.v3+json',
+								'Content-Type': 'application/json'
+							},
+							data: JSON.stringify({
+								message: `Sync Links DB: ${new Date().toISOString()}`,
+								content: base64,
+								sha: sha
+							}),
+							onload: resolve,
+							onerror: (e) => resolve({ status: 500, statusText: e.message })
+						});
+					});
+
+					if (putRes.status >= 400) throw new Error(`Status ${putRes.status}`);
+				}
+				debug('✅ GitHub Links DB successfully synced');
+			} catch (err) {
+				log('[ERROR]', 'GitHub Push failed', { error: err.message });
+			}
+		});
+	}
+
 	async function getDonorLinks(payload) {
 		if (debugMode) {
 			debug('📥 Get donor links: requesting from server', {
@@ -634,7 +802,10 @@
 		pickEpisode,
 		buildUrlMapFromSources,
 		fetchOriginalTitle,
-		fetchConsumetResults
+		fetchConsumetResults,
+		isPlusUser,
+		githubFetch,
+		githubUpdate
 	};
 	})();
 	
