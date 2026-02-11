@@ -434,123 +434,59 @@
 	}
 
 	async function githubUpdate(repo, path, token, updateFn) {
-		if (!repo || !path || !token || typeof updateFn !== 'function') {
-			log('[ERROR]', 'githubUpdate: Missing parameters');
-			return;
-		}
+		if (!repo || !path || !token || typeof updateFn !== 'function') return;
 
 		return GitHubQueue.add(async () => {
-			const [owner, repoName] = repo.split('/');
-			if (!owner || !repoName) {
-				log('[ERROR]', 'githubUpdate: Invalid repo format (expected owner/repo)');
-				return;
-			}
+			const apiUrl = `https://api.github.com/repos/${repo}/contents/${path}`;
+			const headers = {
+				'Authorization': `token ${token}`,
+				'Accept': 'application/vnd.github.v3+json'
+			};
 
-			let octokit;
-			try {
-				// Use Octokit if available (from @require)
-				const OctokitRef = window.Octokit || (typeof Octokit !== 'undefined' ? Octokit : null);
-				if (OctokitRef) {
-					octokit = new OctokitRef({ auth: token });
-					debug('GitHub Sync: Using Octokit Core');
-				}
-			} catch (e) {
-				debug('GitHub Sync: Octokit initialization failed, falling back to manual');
-			}
+			const request = (method, data = null) => new Promise(resolve => {
+				GM_xmlhttpRequest({
+					method,
+					url: apiUrl,
+					headers: { ...headers, ...(data ? { 'Content-Type': 'application/json' } : {}) },
+					data: data ? JSON.stringify(data) : null,
+					onload: resolve,
+					onerror: (e) => resolve({ status: 500, responseText: e.message })
+				});
+			});
 
+			// 1. Get current state
+			const res = await request('GET');
 			let sha = null;
 			let currentData = {};
 
-			try {
-				if (octokit) {
-					// 1. Get SHA and current data via Octokit
-					const res = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {
-						owner,
-						repo: repoName,
-						path,
-						headers: { 'cache-control': 'no-cache' }
-					});
-
-					if (res.status === 200) {
-						sha = res.data.sha;
-						const decoded = decodeURIComponent(escape(atob(res.data.content.replace(/\s/g, ''))));
-						currentData = JSON.parse(decoded);
-					}
-				} else {
-					// Manual Fallback (GM_xmlhttpRequest)
-					const res = await new Promise(resolve => {
-						GM_xmlhttpRequest({
-							method: 'GET',
-							url: `https://api.github.com/repos/${repo}/contents/${path}`,
-							headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' },
-							onload: resolve,
-							onerror: (e) => resolve({ status: 500, statusText: e.message })
-						});
-					});
-
-					if (res.status === 200) {
-						const data = JSON.parse(res.responseText);
-						sha = data.sha;
-						const decoded = decodeURIComponent(escape(atob(data.content.replace(/\s/g, ''))));
-						currentData = JSON.parse(decoded);
-					} else if (res.status !== 404) {
-						throw new Error(`GitHub API error ${res.status}`);
-					}
-				}
-			} catch (e) {
-				if (e.status !== 404) {
-					log('[ERROR]', 'GitHub Fetch failed during sync', { error: e.message });
-					return; // Stop if it's a real error (not 404)
-				}
-				debug('GitHub file not found, will create new one');
-			}
-
-			// 2. Prepare new data
-			const newData = updateFn(currentData);
-			if (!newData) {
-				debug('GitHub sync: No changes to push');
+			if (res.status === 200) {
+				const data = JSON.parse(res.responseText);
+				sha = data.sha;
+				try {
+					currentData = JSON.parse(decodeURIComponent(escape(atob(data.content.replace(/\s/g, '')))));
+				} catch (e) { currentData = {}; }
+			} else if (res.status !== 404) {
+				log('[ERROR]', `GitHub API Error: ${res.status}`);
 				return;
 			}
 
-			const jsonStr = JSON.stringify(newData, null, 2);
-			const base64 = btoa(unescape(encodeURIComponent(jsonStr)));
+			// 2. Process
+			const newData = updateFn(currentData);
+			if (!newData) return;
 
-			// 3. Push to GitHub
-			try {
-				if (octokit) {
-					await octokit.request('PUT /repos/{owner}/{repo}/contents/{path}', {
-						owner,
-						repo: repoName,
-						path,
-						message: `Sync Links DB: ${new Date().toISOString()}`,
-						content: base64,
-						sha: sha
-					});
-				} else {
-					const putRes = await new Promise(resolve => {
-						GM_xmlhttpRequest({
-							method: 'PUT',
-							url: `https://api.github.com/repos/${repo}/contents/${path}`,
-							headers: {
-								'Authorization': `token ${token}`,
-								'Accept': 'application/vnd.github.v3+json',
-								'Content-Type': 'application/json'
-							},
-							data: JSON.stringify({
-								message: `Sync Links DB: ${new Date().toISOString()}`,
-								content: base64,
-								sha: sha
-							}),
-							onload: resolve,
-							onerror: (e) => resolve({ status: 500, statusText: e.message })
-						});
-					});
+			const base64 = btoa(unescape(encodeURIComponent(JSON.stringify(newData, null, 2))));
+			
+			// 3. Push
+			const putRes = await request('PUT', {
+				message: `Sync Links DB: ${new Date().toISOString()}`,
+				content: base64,
+				sha
+			});
 
-					if (putRes.status >= 400) throw new Error(`Status ${putRes.status}`);
-				}
+			if (putRes.status < 300) {
 				debug('✅ GitHub Links DB successfully synced');
-			} catch (err) {
-				log('[ERROR]', 'GitHub Push failed', { error: err.message });
+			} else {
+				log('[ERROR]', `GitHub Push failed: ${putRes.status}`);
 			}
 		});
 	}
